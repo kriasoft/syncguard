@@ -1,19 +1,98 @@
 {
-  "name": "d-lock",
-  "version": "0.1.0",
+  "name": "syncguard",
+  "version": "0.2.0",
+  "description": "Functional TypeScript library for distributed locking across microservices. Prevents race conditions with Redis, Firestore, and custom backends. Features automatic lock management, timeout handling, and extensible architecture.",
+  "keywords": [
+    "atomic",
+    "backend-agnostic",
+    "cluster",
+    "concurrency",
+    "coordination",
+    "critical-section",
+    "database-lock",
+    "distributed-lock",
+    "distributed-systems",
+    "firestore",
+    "functional",
+    "gcp",
+    "google-cloud",
+    "lock",
+    "microservices",
+    "multi-process",
+    "mutex",
+    "nosql",
+    "parallel",
+    "race-condition",
+    "redis",
+    "resource-locking",
+    "semaphore",
+    "synchronization",
+    "typescript"
+  ],
+  "author": "Konstantin Tarkus <hello@tarkus.me>",
+  "license": "MIT",
+  "homepage": "https://github.com/kriasoft/syncguard#readme",
+  "repository": "github:kriasoft/syncguard",
+  "bugs": "https://github.com/kriasoft/syncguard/issues",
+  "funding": "https://github.com/sponsors/koistya",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "type": "module",
-  "module": "index.ts",
+  "main": "./index.js",
+  "module": "./index.js",
+  "files": [
+    "*.js",
+    "*.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc && cp ./package.json ./LICENSE ./README.md ./dist",
+    "dev": "tsc --watch",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./common": {
+      "types": "./common/index.d.ts",
+      "default": "./common/index.js"
+    },
+    "./firestore": {
+      "types": "./firestore/index.d.ts",
+      "default": "./firestore/index.js"
+    },
+    "./redis": {
+      "types": "./redis/index.d.ts",
+      "default": "./redis/index.js"
     }
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "@google-cloud/firestore": "^7",
+    "ioredis": "^5"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    },
+    "@google-cloud/firestore": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "ioredis": "^5.6.1",
+    "@google-cloud/firestore": "^7.11.1",
     "@types/bun": "latest",
-    "prettier": "^3.5.3"
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3"
   }
 }
