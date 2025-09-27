@@ -1,0 +1,17 @@
+# Docker Compose for running Redis during integration tests
+# Usage: docker-compose -f docker-compose.test.yml up -d redis
+
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 10

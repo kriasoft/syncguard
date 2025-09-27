@@ -35,6 +35,6 @@ export function createFirestoreBackend(
     acquire: createAcquireOperation(db, locksCollection, config),
     release: createReleaseOperation(db, locksCollection, config),
     extend: createExtendOperation(db, locksCollection, config),
-    isLocked: createIsLockedOperation(locksCollection, config),
+    isLocked: createIsLockedOperation(db, locksCollection, config),
   };
 }
