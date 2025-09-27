@@ -43,8 +43,8 @@
   "module": "./index.js",
   "types": "./index.d.ts",
   "files": [
-    "*.js",
-    "*.d.ts",
+    "**/*.js",
+    "**/*.d.ts",
     "LICENSE",
     "README.md"
   ],
