@@ -1,6 +1,6 @@
 {
   "name": "syncguard",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Functional TypeScript library for distributed locking across microservices. Prevents race conditions with Redis, Firestore, and custom backends. Features automatic lock management, timeout handling, and extensible architecture.",
   "keywords": [
     "atomic",
@@ -53,7 +53,11 @@
     "build": "rm -rf ./dist && tsc && cp ./package.json ./LICENSE ./README.md ./dist",
     "dev": "tsc --watch",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:unit": "bun test test/unit",
+    "test:integration": "bun test test/integration",
+    "test:watch": "bun test --watch"
   },
   "exports": {
     ".": {
@@ -90,10 +94,10 @@
     }
   },
   "devDependencies": {
-    "ioredis": "^5.6.1",
-    "@google-cloud/firestore": "^7.11.1",
-    "@types/bun": "latest",
-    "prettier": "^3.5.3",
-    "typescript": "^5.8.3"
+    "ioredis": "^5.8.0",
+    "@google-cloud/firestore": "^7.11.6",
+    "@types/bun": "1.2.22",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
   }
 }

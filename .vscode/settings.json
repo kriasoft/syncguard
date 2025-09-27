@@ -31,5 +31,7 @@
   "editor.wordBasedSuggestions": "matchingDocuments",
 
   // File explorer improvements
-  "explorer.sortOrder": "type"
+  "explorer.sortOrder": "type",
+
+  "cSpell.words": ["firestore"]
 }
