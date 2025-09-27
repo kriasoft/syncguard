@@ -1,7 +1,3 @@
----
-applyTo: "firestore/**/*"
----
-
 # Firestore Backend Requirements
 
 ## Document Storage Strategy
@@ -9,6 +5,7 @@ applyTo: "firestore/**/*"
 - **Document ID**: Use lock `key` as Firestore document ID
 - **Collection**: Default `"locks"`, configurable via `collection` option
 - **Document Schema**:
+
   ```typescript
   interface LockDocument {
     lockId: string; // For ownership verification
@@ -58,3 +55,26 @@ Create single-field index on `lockId` field for release/extend performance.
 ### Don't Retry
 
 - `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION`
+
+## Implementation Architecture
+
+### Performance Characteristics
+
+- **Direct document access**: O(1) for acquire and isLocked operations
+- **Query-then-verify**: O(log n) for release and extend operations (requires lockId index)
+- **Transaction overhead**: ~2-5ms per operation depending on Firestore latency
+- **Expected throughput**: 100-500 ops/sec depending on region and network
+
+### Backend Configuration
+
+- **Collection name**: Configurable via `collection` option (default: "locks")
+- **Index requirement**: Single-field ascending index on `lockId` field
+- **Retry configuration**: Exponential backoff for transient errors
+- **TTL handling**: Manual cleanup in isLocked operation (fire-and-forget)
+
+### Testing Strategy
+
+- **Unit tests**: Mock Firestore with in-memory transactions, no external dependencies
+- **Integration tests**: Real Firestore instance, validates transaction behavior and indexing
+- **Performance tests**: Measures transaction latency and throughput under load
+- **Index validation**: Ensures required lockId index exists and performs correctly

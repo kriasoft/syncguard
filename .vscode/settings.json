@@ -33,5 +33,5 @@
   // File explorer improvements
   "explorer.sortOrder": "type",
 
-  "cSpell.words": ["firestore"]
+  "cSpell.words": ["firestore", "kriasoft", "syncguard"]
 }

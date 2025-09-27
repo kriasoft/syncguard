@@ -1,54 +1,38 @@
 /* SPDX-FileCopyrightText: 2025-present Kriasoft */
 /* SPDX-License-Identifier: MIT */
 
-import type { Redis } from "ioredis";
 import type { LockConfig, LockResult } from "../../common/backend.js";
 import { generateLockId, mergeLockConfig } from "../../common/backend.js";
 import { withAcquireRetries } from "../retry.js";
 import type { LockData, RedisConfig } from "../types.js";
+import { ACQUIRE_SCRIPT } from "../scripts.js";
 
 /**
- * Lua script for atomic lock acquisition
- * This script:
- * 1. Checks if lock exists and is not expired
- * 2. If lock doesn't exist or is expired, creates new lock
- * 3. Properly cleans up old lockId index using keyPrefix
- * 4. Sets both main lock key and lockId index
- * 5. Returns 1 for success, 0 for failure
+ * Extended Redis interface with defined commands
  */
-const ACQUIRE_SCRIPT = `
-local lockKey = KEYS[1]
-local lockIdKey = KEYS[2]
-local lockData = ARGV[1]
-local ttlSeconds = tonumber(ARGV[2])
-local currentTime = tonumber(ARGV[3])
-local keyPrefix = ARGV[4]
-
--- Check if lock exists
-local existingData = redis.call('GET', lockKey)
-if existingData then
-  local data = cjson.decode(existingData)
-  -- If lock is not expired, return failure
-  if data.expiresAt > currentTime then
-    return 0
-  end
-  -- Lock is expired, we can clean up the old lockId index
-  if data.lockId then
-    local oldLockIdKey = keyPrefix .. 'id:' .. data.lockId
-    redis.call('DEL', oldLockIdKey)
-  end
-end
-
--- Acquire the lock
-redis.call('SET', lockKey, lockData, 'EX', ttlSeconds)
-redis.call('SET', lockIdKey, lockKey, 'EX', ttlSeconds)
-return 1
-`;
+interface RedisWithCommands {
+  eval(
+    script: string,
+    numKeys: number,
+    ...args: (string | number)[]
+  ): Promise<unknown>;
+  acquireLock?(
+    lockKey: string,
+    lockIdKey: string,
+    lockData: string,
+    ttlSeconds: string,
+    currentTime: string,
+    keyPrefix: string,
+  ): Promise<number>;
+}
 
 /**
  * Creates an acquire operation for Redis backend
  */
-export function createAcquireOperation(redis: Redis, config: RedisConfig) {
+export function createAcquireOperation(
+  redis: RedisWithCommands,
+  config: RedisConfig,
+) {
   return async (lockConfig: LockConfig): Promise<LockResult> => {
     const mergedConfig = mergeLockConfig(lockConfig);
     const lockId = generateLockId();
@@ -87,16 +71,25 @@ export function createAcquireOperation(redis: Redis, config: RedisConfig) {
             } as const;
           }
 
-          const scriptResult = (await redis.eval(
-            ACQUIRE_SCRIPT,
-            2,
-            lockKey,
-            lockIdKey,
-            JSON.stringify(lockData),
-            ttlSeconds.toString(),
-            currentTime.toString(),
-            config.keyPrefix,
-          )) as number;
+          const scriptResult = redis.acquireLock
+            ? await redis.acquireLock(
+                lockKey,
+                lockIdKey,
+                JSON.stringify(lockData),
+                ttlSeconds.toString(),
+                currentTime.toString(),
+                config.keyPrefix,
+              )
+            : ((await redis.eval(
+                ACQUIRE_SCRIPT,
+                2,
+                lockKey,
+                lockIdKey,
+                JSON.stringify(lockData),
+                ttlSeconds.toString(),
+                currentTime.toString(),
+                config.keyPrefix,
+              )) as number);
 
           if (scriptResult === 1) {
             return { acquired: true, expiresAt } as const;

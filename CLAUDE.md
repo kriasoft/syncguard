@@ -5,10 +5,10 @@ TypeScript library for preventing race conditions across microservices using Fir
 ## Commands
 
 ```bash
-npm run build      # Build to dist/
-npm run typecheck  # Type check without emit
-npm run format     # Prettier auto-format
-npm run dev        # Watch mode
+bun run build      # Build to dist/
+bun run typecheck  # Type check without emit
+bun run format     # Prettier auto-format
+bun run dev        # Watch mode
 ```
 
 ## Architecture
@@ -55,6 +55,9 @@ type LockResult =
 
 ```text
 index.ts           → Core exports for custom backends
+specs/
+  firestore.md     → Firestore backend implementation requirements
+  redis.md         → Redis backend implementation requirements
 common/
   backend.ts       → LockBackend interface, createLock factory, utilities
   index.ts         → Re-exports
@@ -66,6 +69,7 @@ firestore/
   types.ts         → Firestore types (LockDocument, etc.)
 redis/
   backend.ts       → Redis implementation using Lua scripts
+  scripts.ts       → Centralized Lua scripts for script caching
   index.ts         → createLock() wrapper with Redis client
   config.ts        → Redis-specific configuration
   retry.ts         → Retry logic
@@ -74,32 +78,15 @@ redis/
 
 ## Implementation Requirements
 
-### Performance (O(1) required)
+**Backend-specific requirements**: See `specs/firestore.md` and `specs/redis.md`
 
-- **Acquire/IsLocked**: Direct document access by key
-- **Release/Extend**: Query by lockId field, then atomic update (O(log n) acceptable)
+### Key Design Principles
 
-### Lock Operations
-
-- **Acquire**: Atomic transaction, distinguish contention vs errors, cleanup expired locks
-- **Release**: Query-then-verify ownership, idempotent, atomic deletion
-- **Extend**: Query-then-verify ownership, reject expired locks
-- **IsLocked**: Non-mutating, opportunistic cleanup
-
-### Configuration Defaults
-
-- TTL: 30 seconds
-- Timeout: 5 seconds
-- Max retries: 10
-- Retry delay: 100ms
-
-### Critical Behaviors
-
-- Lock IDs: `crypto.randomUUID()` with timestamp fallback
-- Firestore: Requires index on `lockId` field, uses key as document ID
-- Redis: Uses atomic Lua scripts for race-free operations
-- Both: Automatic TTL-based cleanup
-- Error handling: Release failures logged but don't throw
+- **Performance**: O(1) acquire/isLocked, O(log n) release/extend acceptable
+- **Atomicity**: All operations use transactions (Firestore) or Lua scripts (Redis)
+- **Lock IDs**: `crypto.randomUUID()` with timestamp fallback
+- **TTL-based cleanup**: Automatic expiration handling
+- **Error distinction**: Separate lock contention from system errors
 
 ### Module Exports
 
@@ -109,13 +96,14 @@ redis/
 
 ## Testing Approach
 
-When testing changes:
+**Hybrid testing strategy** - See `test/README.md` for details
 
-1. Build the project: `npm run build`
-2. Type check: `npm run typecheck`
-3. Test examples manually:
-   - `bun example/firestore.ts` (requires Firestore emulator or credentials)
-   - `bun example/redis.ts` (requires local Redis)
+### Development workflow
+
+1. **Unit tests**: `bun run test` (fast, mocked dependencies)
+2. **Build/typecheck**: `bun run build && bun run typecheck`
+3. **Integration tests**: `bun run test:integration` (requires Redis)
+4. **Performance validation**: `bun run test:performance` (optional)
 
 ## Code Standards
 
