@@ -13,7 +13,7 @@ If you discover a security vulnerability in SyncGuard, please report it responsi
 
 **DO NOT** open a public issue for security vulnerabilities.
 
-Instead, please email: <security@github.com>
+Instead, please email: <security@kriasoft.com>
 
 Include in your report:
 
@@ -26,7 +26,7 @@ Include in your report:
 
 - **Acknowledgment**: Within 48 hours
 - **Initial assessment**: Within 1 week
-- **Fix timeline**: Depends on severity, typically 2-4 weeks
+- **Fix timeline**: Depends on severity, typically 1-4 weeks
 
 Critical vulnerabilities affecting distributed locking integrity will be prioritized and may receive emergency patches.
 

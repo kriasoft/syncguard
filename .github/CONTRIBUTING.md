@@ -47,7 +47,7 @@ Thanks for your interest in contributing! This guide will help you get started.
    ```bash
    bun run typecheck   # Type checking
    bun run format      # Auto-format code
-   bun test      # All tests
+   bun test            # All tests
    ```
 
 ### Testing Strategy
@@ -121,14 +121,10 @@ test/
 
 ## Getting Help
 
-- **Questions**: Open a GitHub discussion or join our [Discord](https://discord.gg/EnbEa7Gsxg)
+- **Questions**: Open a [discussion](https://github.com/kriasoft/syncguard/discussions) or join our [Discord](https://discord.gg/EnbEa7Gsxg)
 - **Bugs**: Check existing issues first
 - **Ideas**: Start with a discussion before coding
 
 ## Code of Conduct
 
 Be respectful, inclusive, and constructive. We're all here to build something useful together.
-
----
-
-**Questions?** Feel free to ask in issues or discussions. Thanks for contributing! 🎉
