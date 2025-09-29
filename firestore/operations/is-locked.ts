@@ -1,21 +1,32 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 import type { CollectionReference, Firestore } from "@google-cloud/firestore";
-import { withRetries } from "../retry.js";
+import {
+  type KeyOp,
+  LockError,
+  makeStorageKey,
+  normalizeAndValidateKey,
+} from "../../common/backend.js";
+import { isLive, TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
+import { mapFirestoreError } from "../errors.js";
 import type { FirestoreConfig, LockDocument } from "../types.js";
 
 /**
- * Creates an isLocked operation for Firestore backend
+ * Creates isLocked operation for Firestore backend.
+ * Uses transactional cleanup with safety guard when enabled.
+ * @see ../../common/time-predicates.ts for expiration logic
  */
 export function createIsLockedOperation(
   db: Firestore,
   locksCollection: CollectionReference,
   config: FirestoreConfig,
 ) {
-  return async (key: string): Promise<boolean> => {
-    return withRetries(async () => {
-      const docRef = locksCollection.doc(key);
+  return async (opts: KeyOp): Promise<boolean> => {
+    try {
+      const normalizedKey = normalizeAndValidateKey(opts.key);
+      const storageKey = makeStorageKey("", normalizedKey, 1500); // Firestore 1500-byte document ID limit
+      const docRef = locksCollection.doc(storageKey);
       const doc = await docRef.get();
 
       if (!doc.exists) {
@@ -23,28 +34,43 @@ export function createIsLockedOperation(
       }
 
       const data = doc.data() as LockDocument;
-      const currentTime = Date.now();
+      const nowMs = Date.now();
 
-      if (data.expiresAt <= currentTime) {
-        // Use atomic transaction for cleanup to prevent race conditions
-        try {
-          await db.runTransaction(async (trx) => {
-            const transactionDoc = await trx.get(docRef);
-            if (transactionDoc.exists) {
-              const transactionData = transactionDoc.data() as LockDocument;
-              // Double-check expiration within transaction
-              if (transactionData.expiresAt <= currentTime) {
-                trx.delete(docRef);
+      if (!isLive(data.expiresAtMs, nowMs, TIME_TOLERANCE_MS)) {
+        if (config.cleanupInIsLocked) {
+          // 1s safety guard prevents race with concurrent extend operations
+          const guardMs = 1000;
+          if (nowMs - data.expiresAtMs > TIME_TOLERANCE_MS + guardMs) {
+            // Fire-and-forget: non-blocking cleanup, swallow errors
+            db.runTransaction(async (trx) => {
+              const transactionDoc = await trx.get(docRef);
+              if (transactionDoc.exists) {
+                const transactionData = transactionDoc.data() as LockDocument;
+                // Re-verify expiration in transaction to prevent races
+                if (
+                  !isLive(
+                    transactionData.expiresAtMs,
+                    nowMs,
+                    TIME_TOLERANCE_MS + guardMs,
+                  )
+                ) {
+                  await trx.delete(docRef);
+                }
               }
-            }
-          });
-        } catch {
-          // Ignore cleanup errors - lock will eventually be cleaned up by other operations
+            }).catch(() => {
+              // Lock expires naturally if cleanup fails
+            });
+          }
         }
         return false;
       }
 
       return true;
-    }, config);
+    } catch (error) {
+      if (error instanceof LockError) {
+        throw error;
+      }
+      throw mapFirestoreError(error);
+    }
   };
 }

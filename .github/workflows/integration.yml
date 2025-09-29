@@ -25,9 +25,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version: "25"
 
       - run: bun install --frozen-lockfile
       - run: bun run build
 
+      # Launch Firestore emulator
+      - run: bun firebase emulators:start --only firestore & echo $! > emulator.pid
+
       - run: bun run test:integration
       - run: bun run test:performance
+
+      - name: Kill Firestore emulator
+        if: always()
+        run: |
+          if [ -f emulator.pid ]; then
+            kill $(cat emulator.pid) || true
+            rm emulator.pid
+            echo "Emulator killed"
+          fi

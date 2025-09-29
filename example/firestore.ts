@@ -1,45 +1,62 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 /**
- * Example usage of the D-Lock library with Firestore backend
+ * Example usage patterns for distributed locks with Firestore backend.
+ * Demonstrates auto-managed locks, manual control, and common patterns.
+ * @see specs/interface.md for complete API reference
  */
 
 import { Firestore } from "@google-cloud/firestore";
-import { createLock } from "syncguard/firestore";
+import { createFirestoreBackend, createLock } from "syncguard/firestore";
 
-// Initialize Firestore
 const db = new Firestore({
   projectId: "your-project-id",
-  // Add your Firestore configuration here
 });
 
-// Create a lock instance with Firestore backend
+/**
+ * Creates lock manager with exponential backoff: 150ms * 2^attempt, max 5 attempts.
+ * @see firestore/config.ts for configuration options
+ */
+// Backend for manual lock operations
+const backend = createFirestoreBackend(db, {
+  collection: "distributed_locks",
+});
+
+// Auto-managed lock function
 const lock = createLock(db, {
-  collection: "distributed_locks", // Custom collection name
-  retryDelayMs: 150,
-  maxRetries: 5,
+  collection: "distributed_locks",
 });
 
-// Example 1: Automatic lock management (recommended approach)
+/**
+ * Example 1: Auto-managed locks (recommended).
+ * Lock auto-acquired, function executed, lock auto-released.
+ * @see common/auto-lock.ts for implementation
+ */
 async function processInventoryUpdate(itemId: string) {
   try {
     const result = await lock(
       async () => {
         console.log(`Processing inventory update for item: ${itemId}`);
-
-        // Simulate some critical work that must be done exclusively
         await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Update inventory in database
         console.log(`Inventory updated for item: ${itemId}`);
         return { itemId, status: "updated" };
       },
       {
         key: `inventory:${itemId}`,
-        ttlMs: 30000, // 30 seconds
-        timeoutMs: 10000, // Wait up to 10 seconds to acquire lock
-        maxRetries: 3,
+        ttlMs: 30000,
+        acquisition: {
+          timeoutMs: 10000,
+          maxRetries: 3,
+        },
+        // Release failures are rare but should be logged for observability
+        onReleaseError(error, context) {
+          console.error(
+            `Firestore lock release failed for ${context.key} (${context.lockId}):`,
+            error,
+          );
+          // Report to error tracking: errorReporter.captureException(error, { tags: { lockKey: key, lockId } })
+        },
       },
     );
 
@@ -49,35 +66,39 @@ async function processInventoryUpdate(itemId: string) {
   }
 }
 
-// Example 2: Manual lock management for more control
+/**
+ * Example 2: Manual lock control for long-running operations.
+ * Demonstrates explicit acquire/extend/release pattern.
+ */
 async function processBatchOperation() {
-  const lockResult = await lock.acquire({
+  const lockResult = await backend.acquire({
     key: "batch:daily-report",
-    ttlMs: 300000, // 5 minutes
-    timeoutMs: 5000,
+    ttlMs: 300000,
   });
 
-  if (!lockResult.success) {
-    console.error("Could not acquire batch lock:", lockResult.error);
+  if (!lockResult.ok) {
+    console.error("Could not acquire batch lock (locked by another process)");
     return;
   }
 
   console.log(
-    `Acquired lock: ${lockResult.lockId}, expires at: ${lockResult.expiresAt}`,
+    `Acquired lock: ${lockResult.lockId}, expires at: ${lockResult.expiresAtMs}`,
   );
 
   try {
-    // Perform long-running batch operation
     console.log("Starting batch processing...");
 
     for (let i = 0; i < 5; i++) {
       console.log(`Processing batch ${i + 1}/5...`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Extend lock if needed for long operations
+      // Extend TTL mid-operation to prevent expiry during long processing
       if (i === 2) {
-        const extended = await lock.extend(lockResult.lockId, 300000);
-        if (!extended) {
+        const extendResult = await backend.extend({
+          lockId: lockResult.lockId,
+          ttlMs: 300000,
+        });
+        if (!extendResult.ok) {
           throw new Error(
             "Failed to extend lock - another process may have acquired it. " +
               "Aborting batch operation to prevent race conditions.",
@@ -89,42 +110,46 @@ async function processBatchOperation() {
 
     console.log("Batch processing completed");
   } finally {
-    // Always release the lock
-    const released = await lock.release(lockResult.lockId);
-    console.log("Lock released:", released);
+    // Always release in finally block to prevent lock leak
+    const releaseResult = await backend.release({ lockId: lockResult.lockId });
+    console.log("Lock released:", releaseResult.ok);
   }
 }
 
-// Example 3: Check lock status
+/**
+ * Example 3: Non-blocking lock status check.
+ * Returns true if any lock exists for the key, regardless of ownership.
+ */
 async function checkResourceStatus(resourceId: string) {
-  const isLocked = await lock.isLocked(`resource:${resourceId}`);
+  const isLocked = await backend.isLocked({ key: `resource:${resourceId}` });
   console.log(`Resource ${resourceId} is ${isLocked ? "locked" : "available"}`);
   return isLocked;
 }
 
-// Example 4: Rate limiting pattern
+/**
+ * Example 4: Rate limiting with locks.
+ * Lock acquired once per window, never released (expires naturally).
+ * Fails immediately if already locked.
+ */
 async function rateLimitedAPI(userId: string) {
   const rateLimitKey = `rate-limit:user:${userId}`;
 
-  const lockResult = await lock.acquire({
+  const lockResult = await backend.acquire({
     key: rateLimitKey,
-    ttlMs: 60000, // 1 minute rate limit window
-    timeoutMs: 0, // Don't wait, fail immediately if locked
-    maxRetries: 0,
+    ttlMs: 60000,
   });
 
-  if (!lockResult.success) {
+  if (!lockResult.ok) {
     throw new Error("Rate limit exceeded. Please try again later.");
   }
 
-  // Perform API operation
   console.log(`API call processed for user: ${userId}`);
 
-  // Note: We don't release the lock - let it expire naturally for rate limiting
-  return { success: true, rateLimitExpires: lockResult.expiresAt };
+  // Lock not released - TTL expiry enforces rate limit window
+  return { success: true, rateLimitExpires: lockResult.expiresAtMs };
 }
 
-// Demo function to run examples
+/** Runs all example patterns sequentially */
 async function runExamples() {
   console.log("=== D-Lock Examples ===\n");
 
@@ -141,7 +166,7 @@ async function runExamples() {
     console.log("\n4. Testing rate limiting...");
     await rateLimitedAPI("user-456");
 
-    // Try to call again immediately (should be rate limited)
+    // Second call should be rate limited
     try {
       await rateLimitedAPI("user-456");
     } catch (error) {
@@ -155,7 +180,7 @@ async function runExamples() {
   }
 }
 
-// Uncomment to run examples (requires proper Firestore setup)
+// Uncomment to run (requires Firestore setup: firebase emulators:start)
 // runExamples()
 
 export { runExamples };

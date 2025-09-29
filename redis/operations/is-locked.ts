@@ -1,12 +1,20 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
-import { withRetries } from "../retry.js";
-import type { RedisConfig } from "../types.js";
+import {
+  type KeyOp,
+  LockError,
+  makeStorageKey,
+  normalizeAndValidateKey,
+} from "../../common/backend.js";
+import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
+import { mapRedisError } from "../errors.js";
 import { IS_LOCKED_SCRIPT } from "../scripts.js";
+import type { RedisConfig } from "../types.js";
 
 /**
- * Extended Redis interface with defined commands
+ * Redis interface supporting both direct eval and cached command wrappers.
+ * @see ../scripts.ts for Lua script definitions
  */
 interface RedisWithCommands {
   eval(
@@ -14,40 +22,53 @@ interface RedisWithCommands {
     numKeys: number,
     ...args: (string | number)[]
   ): Promise<unknown>;
+  /** Cached command wrapper for IS_LOCKED_SCRIPT (ioredis defineCommand) */
   checkLock?(
     lockKey: string,
     keyPrefix: string,
-    currentTime: string,
+    toleranceMs: string,
+    enableCleanup: string,
   ): Promise<number>;
 }
 
 /**
- * Creates an isLocked operation for Redis backend
+ * Creates isLocked operation using Lua script for atomicity.
+ * Script checks expiration and optionally cleans up with safety guard.
+ * @see ../scripts.ts for IS_LOCKED_SCRIPT implementation
  */
 export function createIsLockedOperation(
   redis: RedisWithCommands,
   config: RedisConfig,
 ) {
-  return async (key: string): Promise<boolean> => {
-    return withRetries(async () => {
-      const lockKey = `${config.keyPrefix}${key}`;
-      const currentTime = Date.now();
+  return async (opts: KeyOp): Promise<boolean> => {
+    try {
+      const normalizedKey = normalizeAndValidateKey(opts.key);
 
+      const lockKey = makeStorageKey(config.keyPrefix, normalizedKey, 1000);
+
+      // Prefer cached command (ioredis) over eval for better performance
       const scriptResult = redis.checkLock
         ? await redis.checkLock(
             lockKey,
             config.keyPrefix,
-            currentTime.toString(),
+            TIME_TOLERANCE_MS.toString(),
+            config.cleanupInIsLocked.toString(),
           )
         : ((await redis.eval(
             IS_LOCKED_SCRIPT,
             1,
             lockKey,
             config.keyPrefix,
-            currentTime.toString(),
+            TIME_TOLERANCE_MS.toString(),
+            config.cleanupInIsLocked.toString(),
           )) as number);
 
       return scriptResult === 1;
-    }, config);
+    } catch (error) {
+      if (error instanceof LockError) {
+        throw error;
+      }
+      throw mapRedisError(error);
+    }
   };
 }

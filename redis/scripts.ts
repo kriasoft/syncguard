@@ -1,162 +1,263 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 /**
- * Lua script for atomic lock acquisition
- * This script:
- * 1. Checks if lock exists and is not expired
- * 2. If lock doesn't exist or is expired, creates new lock
- * 3. Properly cleans up old lockId index using keyPrefix
- * 4. Sets both main lock key and lockId index
- * 5. Returns 1 for success, 0 for failure
+ * Atomic lock acquisition with fencing tokens.
+ * Flow: check expiration → generate fence token → set both keys with TTL
+ *
+ * @returns {1, fence} on success, 0 on contention
+ * @see specs/redis.md for acquire operation spec
+ *
+ * KEYS: [lockKey, lockIdKey, fenceKey]
+ * ARGV: [lockId, ttlMs, toleranceMs, key]
  */
 export const ACQUIRE_SCRIPT = `
 local lockKey = KEYS[1]
 local lockIdKey = KEYS[2]
-local lockData = ARGV[1]
-local ttlSeconds = tonumber(ARGV[2])
-local currentTime = tonumber(ARGV[3])
-local keyPrefix = ARGV[4]
+local fenceKey = KEYS[3]
+local lockId = ARGV[1]
+local ttlMs = tonumber(ARGV[2])
+local toleranceMs = tonumber(ARGV[3])
+local key = ARGV[4]
 
--- Check if lock exists
+-- Canonical time: Redis TIME converted to milliseconds
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
 local existingData = redis.call('GET', lockKey)
 if existingData then
   local data = cjson.decode(existingData)
-  -- If lock is not expired, return failure
-  if data.expiresAt > currentTime then
-    return 0
+  if data.expiresAtMs > (nowMs - toleranceMs) then  -- isLive() predicate
+    return 0  -- Contention
   end
-  -- Lock is expired, we can clean up the old lockId index
   if data.lockId then
-    local oldLockIdKey = keyPrefix .. 'id:' .. data.lockId
-    redis.call('DEL', oldLockIdKey)
+    redis.call('DEL', lockIdKey)  -- Clean up expired lockId index
   end
 end
-
--- Acquire the lock
-redis.call('SET', lockKey, lockData, 'EX', ttlSeconds)
-redis.call('SET', lockIdKey, lockKey, 'EX', ttlSeconds)
-return 1
+-- INCR guarantees monotonic fencing tokens
+local fenceNumber = redis.call('INCR', fenceKey)
+local fence = string.format("%019d", fenceNumber)  -- Zero-padded for lexicographic ordering
+-- Atomic dual-key write with identical TTL
+local expiresAtMs = nowMs + ttlMs
+local lockData = cjson.encode({lockId=lockId, expiresAtMs=expiresAtMs, acquiredAtMs=nowMs, key=key, fence=fence})
+redis.call('SET', lockKey, lockData, 'PX', ttlMs)
+redis.call('SET', lockIdKey, key, 'PX', ttlMs)  -- Reverse lookup index
+return {1, fence}
 `;
 
 /**
- * Lua script for atomic lock release
- * This script:
- * 1. Gets the lock key from the lockId index
- * 2. Verifies ownership by checking lockId in the lock data
- * 3. Deletes both main lock and lockId index if ownership is verified
- * 4. Returns 1 for success, 0 for failure (not found or not owned)
+ * Atomic lock release with ownership verification.
+ * Flow: reverse lookup → verify ownership → delete
+ *
+ * @returns 1=success, 0=ownership mismatch, -1=not found, -2=expired
+ * @see specs/adrs.md ADR-003 for ownership verification requirement
+ *
+ * KEYS: [lockIdKey, keyPrefix]
+ * ARGV: [lockId, toleranceMs]
  */
 export const RELEASE_SCRIPT = `
 local lockIdKey = KEYS[1]
+local keyPrefix = KEYS[2]
 local lockId = ARGV[1]
+local toleranceMs = tonumber(ARGV[2])
 
--- Get the lock key from the lockId index
-local lockKey = redis.call('GET', lockIdKey)
-if not lockKey then
-  return 0  -- Lock ID not found
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+
+-- Reverse lookup: lockId → key
+local key = redis.call('GET', lockIdKey)
+if not key then return -1 end
+
+-- Handle prefix with/without trailing colon
+local lockKey
+if string.sub(keyPrefix, -1) == ":" then
+  lockKey = keyPrefix .. key
+else
+  lockKey = keyPrefix .. ":" .. key
 end
 
--- Get the lock data
 local lockData = redis.call('GET', lockKey)
-if not lockData then
-  -- Lock key doesn't exist, but lockId index does - clean up index
-  redis.call('DEL', lockIdKey)
-  return 0
-end
+if not lockData then return -1 end
 
--- Verify ownership
 local data = cjson.decode(lockData)
-if data.lockId ~= lockId then
-  return 0  -- Not the owner
+
+-- Expired lock cleanup (inverted isLive predicate)
+if data.expiresAtMs <= (nowMs - toleranceMs) then
+  redis.call('DEL', lockKey, lockIdKey)
+  return -2
 end
 
--- Delete both keys atomically
-redis.call('DEL', lockKey)
-redis.call('DEL', lockIdKey)
+-- Ownership verification (ADR-003: defense-in-depth)
+if data.lockId ~= lockId then return 0 end
+
+-- Atomic dual-key delete
+redis.call('DEL', lockKey, lockIdKey)
 return 1
 `;
 
 /**
- * Lua script for atomic lock extension
- * This script:
- * 1. Gets the lock key from the lockId index
- * 2. Verifies ownership and that lock hasn't expired
- * 3. Updates the lock data with new expiration time
- * 4. Updates TTL on both keys
- * 5. Returns 1 for success, 0 for failure
+ * Atomic lock extension with ownership verification.
+ * Flow: reverse lookup → verify ownership → replace TTL entirely
+ *
+ * @returns 1=success, 0=ownership mismatch/not found/expired
+ * @see specs/adrs.md ADR-003 for ownership verification requirement
+ *
+ * KEYS: [lockIdKey, keyPrefix]
+ * ARGV: [lockId, toleranceMs, ttlMs]
  */
 export const EXTEND_SCRIPT = `
 local lockIdKey = KEYS[1]
+local keyPrefix = KEYS[2]
 local lockId = ARGV[1]
-local ttlMs = tonumber(ARGV[2])
-local currentTime = tonumber(ARGV[3])
+local toleranceMs = tonumber(ARGV[2])
+local ttlMs = tonumber(ARGV[3])
 
--- Get the lock key from the lockId index
-local lockKey = redis.call('GET', lockIdKey)
-if not lockKey then
-  return 0  -- Lock ID not found
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+
+local key = redis.call('GET', lockIdKey)
+if not key then return 0 end
+
+local lockKey
+if string.sub(keyPrefix, -1) == ":" then
+  lockKey = keyPrefix .. key
+else
+  lockKey = keyPrefix .. ":" .. key
 end
 
--- Get the lock data
 local lockData = redis.call('GET', lockKey)
-if not lockData then
-  -- Lock key doesn't exist, but lockId index does - clean up index
-  redis.call('DEL', lockIdKey)
+if not lockData then return 0 end
+
+local data = cjson.decode(lockData)
+
+-- Cleanup expired lock (simplified to return 0 for all failure modes)
+if data.expiresAtMs <= (nowMs - toleranceMs) then
+  redis.call('DEL', lockKey, lockIdKey)
   return 0
 end
 
--- Verify ownership and expiration
-local data = cjson.decode(lockData)
-if data.lockId ~= lockId then
-  return 0  -- Not the owner
-end
+-- Ownership verification (ADR-003)
+if data.lockId ~= lockId then return 0 end
 
-if data.expiresAt <= currentTime then
-  return 0  -- Lock already expired
-end
-
--- Update the lock data with new expiration
-data.expiresAt = currentTime + ttlMs
-local ttlSeconds = math.ceil(ttlMs / 1000)
-
--- Update both keys with new data and TTL
-redis.call('SET', lockKey, cjson.encode(data), 'EX', ttlSeconds)
-redis.call('EXPIRE', lockIdKey, ttlSeconds)
-
+-- Replace TTL entirely (not additive)
+local newExpiresAtMs = nowMs + ttlMs
+data.expiresAtMs = newExpiresAtMs
+redis.call('SET', lockKey, cjson.encode(data), 'PX', ttlMs)
+redis.call('SET', lockIdKey, key, 'PX', ttlMs)
 return 1
 `;
 
 /**
- * Lua script for checking lock status with cleanup
- * This script:
- * 1. Gets the lock data
- * 2. Checks if it's expired
- * 3. If expired, cleans up both lock and lockId index (fire-and-forget)
- * 4. Returns 1 if locked and not expired, 0 otherwise
+ * Lock status check with optional expired lock cleanup.
+ * Cleanup uses 2s safety buffer to prevent extend() race conditions.
+ *
+ * @returns 1 if locked and live, 0 otherwise
+ * @see specs/redis.md for isLocked operation spec
+ *
+ * KEYS: [lockKey]
+ * ARGV: [keyPrefix, toleranceMs, enableCleanup ("true"|"false")]
  */
 export const IS_LOCKED_SCRIPT = `
 local lockKey = KEYS[1]
 local keyPrefix = ARGV[1]
-local currentTime = tonumber(ARGV[2])
+local toleranceMs = tonumber(ARGV[2])
+local enableCleanup = ARGV[3] == "true"
 
--- Get the lock data
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+
 local lockData = redis.call('GET', lockKey)
 if not lockData then
-  return 0  -- No lock exists
+  return 0
 end
 
--- Check if expired
 local data = cjson.decode(lockData)
-if data.expiresAt <= currentTime then
-  -- Lock is expired, clean up (fire-and-forget)
-  redis.call('DEL', lockKey)
-  if data.lockId then
-    local lockIdKey = keyPrefix .. 'id:' .. data.lockId
-    redis.call('DEL', lockIdKey)
+if data.expiresAtMs <= (nowMs - toleranceMs) then
+  -- Optional cleanup with 2s safety buffer (prevents extend race conditions)
+  if enableCleanup then
+    local guardMs = 2000
+    if nowMs - data.expiresAtMs > guardMs then
+      redis.call('DEL', lockKey)
+      if data.lockId then
+        local lockIdKey
+        if string.sub(keyPrefix, -1) == ":" then
+          lockIdKey = keyPrefix .. 'id:' .. data.lockId
+        else
+          lockIdKey = keyPrefix .. ':id:' .. data.lockId
+        end
+        redis.call('DEL', lockIdKey)
+      end
+    end
   end
   return 0
 end
 
-return 1  -- Lock exists and is not expired
+return 1
+`;
+
+/**
+ * Lookup lock by key.
+ *
+ * @returns lock info (JSON) if live, nil otherwise
+ * @see specs/interface.md for lookup operation spec
+ *
+ * KEYS: [lockKey]
+ * ARGV: [toleranceMs]
+ */
+export const LOOKUP_BY_KEY_SCRIPT = `
+local lockKey = KEYS[1]
+local toleranceMs = tonumber(ARGV[1])
+
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+
+local lockData = redis.call('GET', lockKey)
+if not lockData then
+  return nil
+end
+
+local data = cjson.decode(lockData)
+if data.expiresAtMs <= (nowMs - toleranceMs) then
+  return nil
+end
+
+return cjson.encode(data)
+`;
+
+/**
+ * Lookup lock by lockId using reverse mapping.
+ * Verifies ownership before returning lock info.
+ *
+ * @returns lock info (JSON) if live and owned, nil otherwise
+ * @see specs/interface.md for lookup operation spec
+ *
+ * KEYS: [lockIdKey, keyPrefix]
+ * ARGV: [lockId, toleranceMs]
+ */
+export const LOOKUP_BY_LOCKID_SCRIPT = `
+local lockIdKey = KEYS[1]
+local keyPrefix = KEYS[2]
+local lockId = ARGV[1]
+local toleranceMs = tonumber(ARGV[2])
+
+local time = redis.call('TIME')
+local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+
+local key = redis.call('GET', lockIdKey)
+if not key then return nil end
+
+local lockKey
+if string.sub(keyPrefix, -1) == ":" then
+  lockKey = keyPrefix .. key
+else
+  lockKey = keyPrefix .. ":" .. key
+end
+local lockData = redis.call('GET', lockKey)
+if not lockData then return nil end
+
+local data = cjson.decode(lockData)
+if data.lockId ~= lockId then return nil end
+
+if data.expiresAtMs <= (nowMs - toleranceMs) then return nil end
+
+return lockData
 `;
