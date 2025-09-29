@@ -15,78 +15,77 @@ bun run dev        # Watch mode
 
 ### Core API Design
 
-```typescript
-// Primary pattern - auto-managed locks
-const lock = createLock(backend);
-await lock(
-  async () => {
-    // critical section
-  },
-  { key: "resource:123" },
-);
-
-// Manual control when needed
-const result = await lock.acquire({ key: "resource:123" });
-if (result.success) {
-  try {
-    /* work */
-  } finally {
-    await lock.release(result.lockId);
-  }
-}
-```
-
-### Backend Interface
-
-```typescript
-interface LockBackend {
-  acquire: (config: LockConfig) => Promise<LockResult>;
-  release: (lockId: string) => Promise<boolean>;
-  extend: (lockId: string, ttl: number) => Promise<boolean>;
-  isLocked: (key: string) => Promise<boolean>;
-}
-
-type LockResult =
-  | { success: true; lockId: string; expiresAt: Date }
-  | { success: false; error: string };
-```
+See `specs/interface.md` for complete API examples,usage patterns, LockBackend interface specification, and type definitions.
 
 ### File Structure
 
 ```text
-index.ts           → Core exports for custom backends
-specs/
-  firestore.md     → Firestore backend implementation requirements
-  redis.md         → Redis backend implementation requirements
-common/
-  backend.ts       → LockBackend interface, createLock factory, utilities
-  index.ts         → Re-exports
-firestore/
-  backend.ts       → Firestore implementation of LockBackend
-  index.ts         → createLock() wrapper with Firestore instance
-  config.ts        → Firestore-specific configuration
-  retry.ts         → Retry logic with exponential backoff
-  types.ts         → Firestore types (LockDocument, etc.)
-redis/
-  backend.ts       → Redis implementation using Lua scripts
-  scripts.ts       → Centralized Lua scripts for script caching
-  index.ts         → createLock() wrapper with Redis client
-  config.ts        → Redis-specific configuration
-  retry.ts         → Retry logic
-  types.ts         → Redis types (LockData, etc.)
+Core:
+  index.ts              → Public API exports for custom backends
+  common/
+    backend.ts          → Main entry point re-exporting from focused modules
+    index.ts            → Re-exports from common module
+    types.ts            → Core interfaces, types & capabilities
+    constants.ts        → Configuration constants & defaults
+    errors.ts           → LockError class & error handling
+    validation.ts       → Key & lockId validation helpers
+    crypto.ts           → Cryptographic functions (lockId generation, hashing)
+    helpers.ts          → Utility functions (getByKey, owns, sanitizeLockInfo)
+    auto-lock.ts        → Auto-managed lock functionality (createAutoLock, lock)
+    config.ts           → Configuration merge helpers
+    telemetry.ts        → Observability & telemetry decorators
+
+Backends:
+  firestore/
+    backend.ts          → Firestore LockBackend implementation
+    index.ts            → Convenience wrapper with Firestore client setup
+    config.ts           → Firestore-specific configuration & validation
+    types.ts            → Firestore document schemas (LockDocument, etc.)
+    errors.ts           → Centralized Firestore error mapping
+    operations/
+      acquire.ts        → Atomic acquire operation
+      release.ts        → Atomic release operation
+      extend.ts         → Atomic extend operation
+      is-locked.ts      → Lock status check operation
+      lookup.ts         → Lock lookup by key/lockId (renamed from get-lock-info.ts)
+      index.ts          → Operation exports
+  redis/
+    backend.ts          → Redis LockBackend implementation using Lua scripts
+    index.ts            → Convenience wrapper with Redis client setup
+    scripts.ts          → Centralized Lua scripts for optimal caching
+    config.ts           → Redis-specific configuration & validation
+    types.ts            → Redis data structures (LockData, etc.)
+    errors.ts           → Centralized Redis error mapping
+    operations/
+      acquire.ts        → Atomic acquire operation
+      release.ts        → Atomic release operation
+      extend.ts         → Atomic extend operation
+      is-locked.ts      → Lock status check operation
+      lookup.ts         → Lock lookup by key/lockId (renamed from get-lock-info.ts)
+      index.ts          → Operation exports
+
+Documentation:
+  specs/
+    interface.md        → LockBackend API contracts & usage examples
+    firestore.md        → Firestore backend implementation requirements
+    redis.md            → Redis backend implementation requirements
+    adrs.md             → Architectural decision records
 ```
 
 ## Implementation Requirements
 
-**Backend-specific requirements**: See `specs/firestore.md` and `specs/redis.md`
+**Backend-specific requirements**: See `specs/interface.md`, `specs/firestore.md` and `specs/redis.md`
 
 ### Key Design Principles
 
-- **Performance**: O(1) acquire/isLocked, O(log n) release/extend acceptable
-- **Atomicity**: All operations use transactions (Firestore) or Lua scripts (Redis)
-- **Lock IDs**: `crypto.randomUUID()` with timestamp fallback
-- **TTL-based cleanup**: Automatic expiration handling
-- **Error distinction**: Separate lock contention from system errors
+- No over-engineering - keep it simple and pragmatic.
+- Design APIs that are predictable, composable, and hard to misuse.
+- Record decisions in lightweight ADRs as you go, not retroactively.
+- Make testability a first-class design constraint, not an afterthought.
+- Performance: O(1) acquire/isLocked, O(log n) release/extend acceptable
+- Prioritize correctness and safety over micro-optimizations.
+- Expose the smallest possible public API that solves the problem.
+- Prioritize optimal, simple and elegant API over backwards compatibility.
 
 ### Module Exports
 
@@ -97,6 +96,11 @@ redis/
 ## Testing Approach
 
 **Hybrid testing strategy** - See `test/README.md` for details
+
+Assume that:
+
+- Redis server is already running on localhost:6379
+- Firestore emulator is already running on localhost:8080
 
 ### Development workflow
 

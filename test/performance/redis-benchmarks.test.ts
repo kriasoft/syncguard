@@ -1,5 +1,5 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 /**
  * Performance benchmarks for Redis backend
@@ -14,16 +14,16 @@
  */
 
 import {
+  afterAll,
+  beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
-  beforeAll,
-  afterAll,
-  beforeEach,
 } from "bun:test";
 import Redis from "ioredis";
-import { createRedisBackend } from "../../redis/backend.js";
 import type { LockBackend } from "../../common/backend.js";
+import { createRedisBackend } from "../../redis/backend.js";
 
 describe("Redis Performance Benchmarks", () => {
   let redis: Redis;
@@ -44,8 +44,7 @@ describe("Redis Performance Benchmarks", () => {
 
     backend = createRedisBackend(redis, {
       keyPrefix: testKeyPrefix,
-      retryDelayMs: 10,
-      maxRetries: 3,
+      // maxRetries: 3,
     });
   });
 
@@ -76,8 +75,8 @@ describe("Redis Performance Benchmarks", () => {
           ttlMs: 30000,
         });
 
-        if (result.success) {
-          await backend.release(result.lockId);
+        if (result.ok) {
+          await backend.release({ lockId: result.lockId });
         }
 
         const end = performance.now();
@@ -113,8 +112,8 @@ describe("Redis Performance Benchmarks", () => {
               ttlMs: 5000,
             });
 
-            if (result.success) {
-              await backend.release(result.lockId);
+            if (result.ok) {
+              await backend.release({ lockId: result.lockId });
             }
           }
         },
@@ -150,7 +149,7 @@ describe("Redis Performance Benchmarks", () => {
           key: `warmup:${i}`,
           ttlMs: 1000,
         });
-        if (result.success) await backend.release(result.lockId);
+        if (result.ok) await backend.release({ lockId: result.lockId });
       }
 
       // Measure performance with cached scripts
@@ -162,8 +161,8 @@ describe("Redis Performance Benchmarks", () => {
           ttlMs: 5000,
         });
 
-        if (result.success) {
-          await backend.release(result.lockId);
+        if (result.ok) {
+          await backend.release({ lockId: result.lockId });
         }
 
         const end = performance.now();
@@ -198,7 +197,7 @@ describe("Redis Performance Benchmarks", () => {
           ttlMs: 30000,
         });
 
-        if (result.success) {
+        if (result.ok) {
           lockIds.push(result.lockId);
         }
       }
@@ -215,7 +214,7 @@ describe("Redis Performance Benchmarks", () => {
       // Release all locks
       const releaseStart = performance.now();
       for (const lockId of lockIds) {
-        await backend.release(lockId);
+        await backend.release({ lockId: lockId });
       }
       const releaseTime = performance.now() - releaseStart;
 
@@ -223,9 +222,12 @@ describe("Redis Performance Benchmarks", () => {
         `Released ${lockIds.length} locks in ${releaseTime.toFixed(2)}ms`,
       );
 
-      // Verify cleanup
+      // Verify cleanup (fence keys are expected to persist)
       const remainingKeys = await redis.keys(`${testKeyPrefix}*`);
-      expect(remainingKeys).toHaveLength(0);
+      const fenceKeys = remainingKeys.filter((key) => key.includes(":fence:"));
+      const lockKeys = remainingKeys.filter((key) => !key.includes(":fence:"));
+      expect(lockKeys).toHaveLength(0); // Lock and lockId keys should be cleaned up
+      // Fence keys are expected to persist for monotonicity
     });
 
     it("should clean up expired locks automatically", async () => {
@@ -248,12 +250,15 @@ describe("Redis Performance Benchmarks", () => {
 
       // Trigger cleanup by checking lock status
       for (let i = 0; i < lockCount; i++) {
-        await backend.isLocked(`perf:cleanup:${i}`);
+        await backend.isLocked({ key: `perf:cleanup:${i}` });
       }
 
-      // Verify automatic cleanup occurred
+      // Verify automatic cleanup occurred (fence keys are expected to persist)
       const remainingKeys = await redis.keys(`${testKeyPrefix}*`);
-      expect(remainingKeys.length).toBe(0);
+      const fenceKeys = remainingKeys.filter((key) => key.includes(":fence:"));
+      const lockKeys = remainingKeys.filter((key) => !key.includes(":fence:"));
+      expect(lockKeys.length).toBe(0); // Lock and lockId keys should be cleaned up
+      // Fence keys are expected to persist for monotonicity
     });
   });
 
@@ -265,7 +270,7 @@ describe("Redis Performance Benchmarks", () => {
         ttlMs: 1000,
       });
 
-      expect(blockingResult.success).toBe(true);
+      expect(blockingResult.ok).toBe(true);
 
       const retryAttempts = 20;
       const startTime = performance.now();
@@ -275,8 +280,8 @@ describe("Redis Performance Benchmarks", () => {
         backend.acquire({
           key: "perf:retry:blocked",
           ttlMs: 1000,
-          timeoutMs: 100, // Short timeout to trigger fast failures
-          maxRetries: 2,
+          // timeoutMs: 100, // Short timeout to trigger fast failures
+          // maxRetries: 2,
         }),
       );
 
@@ -284,7 +289,7 @@ describe("Redis Performance Benchmarks", () => {
       const endTime = performance.now();
 
       // All should fail due to contention
-      const failedResults = results.filter((r) => !r.success);
+      const failedResults = results.filter((r) => !r.ok);
       expect(failedResults).toHaveLength(retryAttempts);
 
       const totalTime = endTime - startTime;
@@ -296,8 +301,8 @@ describe("Redis Performance Benchmarks", () => {
       expect(totalTime).toBeLessThan(5000); // Under 5 seconds for all retries
 
       // Clean up
-      if (blockingResult.success) {
-        await backend.release(blockingResult.lockId);
+      if (blockingResult.ok) {
+        await backend.release({ lockId: blockingResult.lockId });
       }
     });
   });

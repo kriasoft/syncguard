@@ -1,59 +1,71 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 import type { CollectionReference, Firestore } from "@google-cloud/firestore";
-import { withRetries } from "../retry.js";
+import {
+  mapFirestoreConditions,
+  mapToMutationResult,
+} from "../../common/backend-semantics.js";
+import {
+  type LockOp,
+  type ReleaseResult,
+  LockError,
+  validateLockId,
+} from "../../common/backend.js";
+import { isLive, TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
+import { mapFirestoreError } from "../errors.js";
 import type { FirestoreConfig, LockDocument } from "../types.js";
 
 /**
- * Creates a release operation for Firestore backend
+ * Creates release operation using Firestore transaction for atomic ownership check + delete.
+ * @see ../../common/backend-semantics.ts for condition mapping
  */
 export function createReleaseOperation(
   db: Firestore,
   locksCollection: CollectionReference,
   config: FirestoreConfig,
 ) {
-  return async (lockId: string): Promise<boolean> => {
-    return withRetries(async () => {
-      // First, find the document by querying for lockId to get the key
-      const querySnapshot = await locksCollection
-        .where("lockId", "==", lockId)
-        .limit(1)
-        .get();
+  return async (opts: LockOp): Promise<ReleaseResult> => {
+    try {
+      validateLockId(opts.lockId);
 
-      if (querySnapshot.empty) {
-        return false;
-      }
-
-      const doc = querySnapshot.docs[0]!;
-      const data = doc.data() as LockDocument;
-
-      // Use transaction for atomic ownership verification and deletion
       const result = await db.runTransaction(async (trx) => {
-        // Use the exact document reference from the query to avoid TOCTOU issues
-        const docRef = doc.ref;
-        const currentDoc = await trx.get(docRef);
+        // Query lockId index for O(1) lookup
+        const querySnapshot = await trx.get(
+          locksCollection.where("lockId", "==", opts.lockId).limit(1),
+        );
 
-        // Handle race condition: document might have been deleted between query and transaction
-        if (!currentDoc.exists) {
-          // Document was deleted between query and transaction - treat as success
-          // since our lockId was found initially but document no longer exists
-          return true;
+        const doc = querySnapshot.docs[0];
+        const data = doc?.data() as LockDocument | undefined;
+        const nowMs = Date.now();
+
+        // Evaluate preconditions for ownership + liveness check
+        const documentExists = !querySnapshot.empty;
+        const ownershipValid = data?.lockId === opts.lockId;
+        const isLockLive = data
+          ? isLive(data.expiresAtMs, nowMs, TIME_TOLERANCE_MS)
+          : false;
+
+        // Map to standard mutation result (succeeded/expired/not_found)
+        const condition = mapFirestoreConditions({
+          documentExists,
+          ownershipValid,
+          isLive: isLockLive,
+        });
+
+        if (condition === "succeeded") {
+          await trx.delete(doc!.ref);
         }
 
-        const currentData = currentDoc.data() as LockDocument;
-
-        // Verify ownership by lockId - this is critical for safety
-        if (currentData.lockId !== lockId) {
-          // Document exists but lockId changed - another lock took this key
-          return false;
-        }
-
-        trx.delete(docRef);
-        return true;
+        return mapToMutationResult(condition);
       });
 
       return result;
-    }, config);
+    } catch (error) {
+      if (error instanceof LockError) {
+        throw error;
+      }
+      throw mapFirestoreError(error);
+    }
   };
 }

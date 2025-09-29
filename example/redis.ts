@@ -1,51 +1,58 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 /**
- * Example usage of the D-Lock library with Redis backend
+ * Example usage patterns for SyncGuard with Redis backend.
+ * Demonstrates automatic lock management, manual control, and error handling.
  */
 
 import Redis from "ioredis";
-import { createLock } from "syncguard/redis";
+import { createLock, createRedisBackend } from "syncguard/redis";
 
-// Initialize Redis client
 const redis = new Redis({
   host: "localhost",
   port: 6379,
-  // Add your Redis configuration here
-  // For Redis Cloud or other hosted Redis:
-  // host: "your-redis-host.com",
-  // port: 6380,
-  // password: "your-password",
-  // tls: {},
+  // For hosted Redis add: password, tls: {}
 });
 
-// Create a lock instance with Redis backend
+// Backend for manual lock operations
+const backend = createRedisBackend(redis, {
+  keyPrefix: "myapp:locks:",
+});
+
+// Auto-managed lock function
 const lock = createLock(redis, {
-  keyPrefix: "myapp:locks:", // Custom key prefix
-  retryDelayMs: 150,
-  maxRetries: 5,
+  keyPrefix: "myapp:locks:",
 });
 
-// Example 1: Automatic lock management (recommended approach)
+// Example 1: Automatic lock management (recommended)
 async function processInventoryUpdate(itemId: string) {
   try {
     const result = await lock(
       async () => {
         console.log(`Processing inventory update for item: ${itemId}`);
 
-        // Simulate some critical work that must be done exclusively
+        // Critical work requiring exclusive access
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        // Update inventory in database
         console.log(`Inventory updated for item: ${itemId}`);
         return { itemId, status: "updated" };
       },
       {
         key: `inventory:${itemId}`,
-        ttlMs: 30000, // 30 seconds
-        timeoutMs: 10000, // Wait up to 10 seconds to acquire lock
-        maxRetries: 3,
+        ttlMs: 30000,
+        acquisition: {
+          timeoutMs: 10000,
+          maxRetries: 3,
+        },
+        // Hook for monitoring/alerting on release failures
+        onReleaseError: (error, context) => {
+          console.error(
+            `Lock release failed for ${context.key} (${context.lockId}):`,
+            error,
+          );
+          // Production: send to monitoring system
+        },
       },
     );
 
@@ -55,52 +62,51 @@ async function processInventoryUpdate(itemId: string) {
   }
 }
 
-// Example 2: Manual lock management for fine-grained control
+// Example 2: Manual lock management (fine-grained control)
 async function processPayment(orderId: string) {
-  const lockResult = await lock.acquire({
+  const lockResult = await backend.acquire({
     key: `payment:${orderId}`,
-    ttlMs: 60000, // 1 minute
-    timeoutMs: 5000, // 5 seconds to acquire
+    ttlMs: 60000,
   });
 
-  if (!lockResult.success) {
-    console.error("Failed to acquire payment lock:", lockResult.error);
+  if (!lockResult.ok) {
+    console.error("Failed to acquire payment lock (locked by another process)");
     return;
   }
 
   console.log(`Payment lock acquired for order: ${orderId}`);
-  console.log(`Lock expires at: ${lockResult.expiresAt}`);
+  console.log(`Lock expires at: ${lockResult.expiresAtMs}`);
 
   try {
-    // Process payment
     console.log("Processing payment...");
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Extend lock if processing takes longer
-    const extended = await lock.extend(lockResult.lockId, 30000); // Extend by 30s
-    if (extended) {
+    // Extend if operation takes longer than expected
+    const extendResult = await backend.extend({
+      lockId: lockResult.lockId,
+      ttlMs: 30000,
+    });
+    if (extendResult.ok) {
       console.log("Lock extended successfully");
     }
 
-    // Complete payment processing
     console.log("Payment processed successfully");
   } catch (error) {
     console.error("Payment processing failed:", error);
   } finally {
-    // Always release the lock
-    const released = await lock.release(lockResult.lockId);
-    console.log(`Lock released: ${released}`);
+    const releaseResult = await backend.release({ lockId: lockResult.lockId });
+    console.log(`Lock released: ${releaseResult.ok}`);
   }
 }
 
-// Example 3: Check if a resource is locked
+// Example 3: Check lock status
 async function checkResourceStatus(resourceId: string) {
-  const isLocked = await lock.isLocked(`resource:${resourceId}`);
+  const isLocked = await backend.isLocked({ key: `resource:${resourceId}` });
   console.log(`Resource ${resourceId} is ${isLocked ? "locked" : "available"}`);
   return isLocked;
 }
 
-// Example 4: Concurrent processing demonstration
+// Example 4: Concurrent operations demonstration
 async function simulateConcurrentUpdates() {
   console.log("\\n--- Simulating concurrent updates ---");
 
@@ -112,7 +118,7 @@ async function simulateConcurrentUpdates() {
   console.log("All updates completed");
 }
 
-// Example 5: Error handling and recovery
+// Example 5: Retry logic with lock protection
 async function robustProcessing(taskId: string) {
   const MAX_RETRIES = 3;
   let attempt = 0;
@@ -123,7 +129,7 @@ async function robustProcessing(taskId: string) {
         async () => {
           console.log(`Processing task ${taskId}, attempt ${attempt + 1}`);
 
-          // Simulate potential failure
+          // Simulated transient failure
           if (Math.random() < 0.3) {
             throw new Error("Random processing error");
           }
@@ -134,16 +140,19 @@ async function robustProcessing(taskId: string) {
         {
           key: `task:${taskId}`,
           ttlMs: 15000,
-          timeoutMs: 5000,
+          acquisition: {
+            timeoutMs: 5000,
+          },
         },
       );
 
-      return; // Success, exit retry loop
+      return;
     } catch (error) {
       attempt++;
+      const message = error instanceof Error ? error.message : String(error);
       console.warn(
         `Task ${taskId} failed (attempt ${attempt}/${MAX_RETRIES}):`,
-        error.message,
+        message,
       );
 
       if (attempt >= MAX_RETRIES) {
@@ -151,22 +160,19 @@ async function robustProcessing(taskId: string) {
         throw error;
       }
 
-      // Wait before retrying
+      // Backoff before retry
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
 }
 
-// Run examples
 async function runExamples() {
-  console.log("D-Lock Redis Backend Examples\\n");
+  console.log("SyncGuard Redis Examples\\n");
 
   try {
-    // Test Redis connection
     await redis.ping();
     console.log("✓ Redis connection successful\\n");
 
-    // Run examples
     await processInventoryUpdate("example-item");
     console.log("\\n---\\n");
 
@@ -183,13 +189,11 @@ async function runExamples() {
   } catch (error) {
     console.error("Example execution failed:", error);
   } finally {
-    // Clean up Redis connection
     await redis.quit();
     console.log("\\nRedis connection closed");
   }
 }
 
-// Run examples if this file is executed directly
 if (require.main === module) {
   runExamples().catch(console.error);
 }

@@ -1,27 +1,26 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 import type { Firestore } from "@google-cloud/firestore";
-import type { LockFunction } from "../common/backend.js";
-import { createLock as createBaseLock } from "../common/backend.js";
+import { createAutoLock } from "../common/backend.js";
 import { createFirestoreBackend } from "./backend.js";
 import type { FirestoreBackendOptions } from "./types.js";
 
 /**
- * Creates a distributed lock function using Firestore backend
- * @param db Firestore instance
- * @param options Backend-specific configuration options
- * @returns Lock function with automatic and manual operations
+ * Creates distributed lock with Firestore backend
+ * @param db - Firestore client instance
+ * @param options - Retry, TTL, and collection config
+ * @returns Auto-managed lock function (see: common/auto-lock.ts)
  */
 export function createLock(
   db: Firestore,
   options: FirestoreBackendOptions = {},
-): LockFunction {
+) {
   const backend = createFirestoreBackend(db, options);
-  return createBaseLock(backend);
+  return createAutoLock(backend);
 }
 
-// Re-export types and backend for advanced usage
+// Re-exports for custom backend implementations
 export { createFirestoreBackend } from "./backend.js";
 export type {
   FirestoreBackendOptions,

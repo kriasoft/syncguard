@@ -6,21 +6,21 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![Discord](https://img.shields.io/discord/643523529131950086?label=Discord&logo=discord&logoColor=white)](https://discord.gg/EnbEa7Gsxg)
 
-TypeScript distributed lock library that prevents race conditions across services. Because nobody wants their payment processed twice! 💸
-
-Supports Firestore and Redis backends with automatic cleanup and bulletproof concurrency control.
+TypeScript distributed lock library that prevents race conditions across services. Supports Redis and Firestore backends with automatic cleanup, fencing tokens, and bulletproof concurrency control.
 
 ## Installation
 
 ```bash
+# Firestore backend
 npm install syncguard @google-cloud/firestore
-# or with Redis (for the speed demons 🏎️)
+
+# Redis backend
 npm install syncguard ioredis
 ```
 
 ## Usage
 
-### Basic Example - Preventing Race Conditions
+### Quick Start
 
 ```typescript
 import { createLock } from "syncguard/firestore";
@@ -42,82 +42,99 @@ await lock(
 );
 ```
 
+### Using Redis
+
+```typescript
+import { createLock } from "syncguard/redis";
+import Redis from "ioredis";
+
+const redis = new Redis();
+const lock = createLock(redis);
+
+await lock(
+  async () => {
+    // Your critical section
+  },
+  { key: "resource:123" },
+);
+```
+
 ### Manual Lock Control
 
 ```typescript
-// For long-running operations that need more control
-const result = await lock.acquire({
+const backend = createRedisBackend(redis);
+
+// Acquire lock manually
+const result = await backend.acquire({
   key: "batch:daily-report",
   ttlMs: 300000, // 5 minutes
-  timeoutMs: 10000, // Wait up to 10s to acquire
 });
 
-if (result.success) {
+if (result.ok) {
   try {
-    await generateDailyReport();
+    const { lockId, fence } = result; // Fencing token for stale lock protection
+    await generateDailyReport(fence);
 
-    // Extend lock if needed (critical: handle failures!)
-    const extended = await lock.extend(result.lockId, 300000);
-    if (!extended) {
-      throw new Error(
-        "Failed to extend lock - aborting to prevent race conditions",
-      );
+    // Extend lock for long-running tasks
+    const extended = await backend.extend({ lockId, ttlMs: 300000 });
+    if (!extended.ok) {
+      throw new Error("Failed to extend lock");
     }
 
     await sendReportEmail();
   } finally {
-    await lock.release(result.lockId);
+    await backend.release({ lockId: result.lockId });
   }
 } else {
-  console.error("Could not acquire lock:", result.error);
+  console.log("Resource is locked by another process");
 }
 ```
 
-### Multiple Backends
+### Ownership Checking
 
 ```typescript
-// Firestore
-import { createLock } from "syncguard/firestore";
-const firestoreLock = createLock(new Firestore());
+import { owns, getByKey } from "syncguard";
 
-// Redis
-import { createLock } from "syncguard/redis";
-const redisLock = createLock(redisClient);
+// Check if you still own the lock
+const stillOwned = await owns(backend, lockId);
 
-// Custom backend
-import { createLock } from "syncguard";
-const customLock = createLock(myBackend);
+// Get lock info by resource key
+const info = await getByKey(backend, "resource:123");
+if (info) {
+  console.log(`Lock expires in ${info.expiresAtMs - Date.now()}ms`);
+}
 ```
 
 ## Configuration
 
-All the knobs and dials you need to tune your locks to perfection:
-
 ```typescript
-interface LockConfig {
-  key: string; // Unique lock identifier
-  ttlMs?: number; // Lock duration (default: 30s)
-  timeoutMs?: number; // Max wait time to acquire (default: 5s)
-  maxRetries?: number; // Retry attempts (default: 10)
-  retryDelayMs?: number; // Delay between retries (default: 100ms)
-}
-```
-
-### Firestore Backend Options
-
-```typescript
-const lock = createLock(db, {
-  collection: "app_locks", // Custom collection name (default: "locks")
-  retryDelayMs: 200, // Override retry delay
-  maxRetries: 15, // More aggressive retries
+// Basic lock options
+await lock(workFn, {
+  key: "resource:123", // Required: unique identifier
+  ttlMs: 30000, // Lock duration (default: 30s)
+  timeoutMs: 5000, // Max acquisition wait (default: 5s)
+  maxRetries: 10, // Retry attempts (default: 10)
 });
 ```
 
-**⚠️ Important:** Firestore backend requires an index on the `lockId` field for optimal performance. Without it, your locks will be slower than a sleepy sloth! 🦥
+### Backend Configuration
+
+```typescript
+// Firestore
+const lock = createLock(db, {
+  collection: "app_locks", // Default: "locks"
+  fenceCollection: "fences", // Default: "fence_counters"
+});
+
+// Redis
+const lock = createLock(redis, {
+  keyPrefix: "myapp", // Default: "syncguard"
+});
+```
+
+**Note:** Firestore requires a single-field index on `lockId` for optimal performance.
 
 ## Error Handling
-
-When things go sideways (and they will), handle it gracefully:
 
 ```typescript
 import { LockError } from "syncguard";
@@ -125,14 +142,14 @@ import { LockError } from "syncguard";
 try {
   await lock(
     async () => {
-      // Your critical section here
+      // Critical section
     },
     { key: "resource:123" },
   );
 } catch (error) {
   if (error instanceof LockError) {
-    console.error("Lock operation failed:", error.code, error.message);
-    // Handle specific error types: ACQUISITION_FAILED, TIMEOUT, etc.
+    console.error(`Lock error [${error.code}]:`, error.message);
+    // Error codes: AcquisitionTimeout, ServiceUnavailable, NetworkTimeout, etc.
   }
 }
 ```
@@ -140,8 +157,6 @@ try {
 ## Common Patterns
 
 ### Preventing Duplicate Job Processing
-
-"I said do it once, not twice!" - Every developer ever
 
 ```typescript
 const processJob = async (jobId: string) => {
@@ -152,85 +167,37 @@ const processJob = async (jobId: string) => {
         await executeJob(job);
         await markJobComplete(jobId);
       }
-      // If job was already processed, this is a no-op (which is perfect!)
     },
-    { key: `job:${jobId}`, ttlMs: 300000 }, // 5 minute timeout
+    { key: `job:${jobId}`, ttlMs: 300000 },
   );
 };
 ```
 
 ### Rate Limiting
 
-Because some users think your API is a free-for-all
-
 ```typescript
+const backend = createRedisBackend(redis);
+
 const checkRateLimit = async (userId: string) => {
-  const result = await lock.acquire({
+  const result = await backend.acquire({
     key: `rate:${userId}`,
     ttlMs: 60000, // 1 minute window
-    timeoutMs: 0, // Fail immediately if locked
-    maxRetries: 0, // No retries for rate limiting
   });
 
-  if (!result.success) {
-    throw new Error("Rate limit exceeded. Slow down there, speed racer! 🏁");
+  if (!result.ok) {
+    throw new Error("Rate limit exceeded");
   }
 
-  // Don't release - let it expire naturally for rate limiting
+  // Don't release - let it expire naturally
   return performOperation(userId);
 };
 ```
 
-### Database Migration Lock
+## Support & Documentation
 
-Single-file migrations only, please
-
-```typescript
-const runMigration = async (version: string) => {
-  await lock(
-    async () => {
-      const currentVersion = await getCurrentDbVersion();
-      if (currentVersion < version) {
-        console.log(`Running migration to version ${version}...`);
-        await runMigrationScripts(version);
-        await updateDbVersion(version);
-      } else {
-        console.log("Migration already applied, skipping");
-      }
-    },
-    { key: "db:migration", ttlMs: 600000 }, // 10 minutes for safety
-  );
-};
-```
-
-## Custom Backends
-
-Implement the `LockBackend` interface for custom storage:
-
-```typescript
-import { LockBackend, createLock } from "syncguard";
-
-const myBackend: LockBackend = {
-  async acquire(config) {
-    /* your implementation */
-  },
-  async release(lockId) {
-    /* your implementation */
-  },
-  async extend(lockId, ttl) {
-    /* your implementation */
-  },
-  async isLocked(key) {
-    /* your implementation */
-  },
-};
-
-const lock = createLock(myBackend);
-```
-
-## Support
-
-Got questions? Hit a snag? Or just want to share your awesome WebSocket creation? Find us on [Discord](https://discord.gg/EnbEa7Gsxg). We promise we don't bite (usually 😉).
+- **Docs**: [Full documentation](https://github.com/kriasoft/syncguard#readme) (coming soon)
+- **Discord**: [Join our community](https://discord.gg/EnbEa7Gsxg)
+- **Issues**: [GitHub Issues](https://github.com/kriasoft/syncguard/issues)
 
 ## Backers
 

@@ -1,99 +1,123 @@
-/* SPDX-FileCopyrightText: 2025-present Kriasoft */
-/* SPDX-License-Identifier: MIT */
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
 
 import type { CollectionReference, Firestore } from "@google-cloud/firestore";
-import type { LockConfig, LockResult } from "../../common/backend.js";
-import { generateLockId, mergeLockConfig } from "../../common/backend.js";
-import { withAcquireRetries } from "../retry.js";
-import type { FirestoreConfig, LockDocument } from "../types.js";
+import {
+  type AcquireResult,
+  formatFence,
+  generateLockId,
+  type KeyOp,
+  LockError,
+  makeStorageKey,
+  normalizeAndValidateKey,
+} from "../../common/backend.js";
+import { isLive, TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
+import { mapFirestoreError } from "../errors.js";
+import type {
+  FenceCounterDocument,
+  FirestoreCapabilities,
+  FirestoreConfig,
+  LockDocument,
+} from "../types.js";
 
 /**
- * Creates an acquire operation for Firestore backend
+ * Creates Firestore acquire operation with transactional fencing.
+ * @see ../types.ts for document schemas
  */
 export function createAcquireOperation(
   db: Firestore,
   locksCollection: CollectionReference,
+  fenceCounterCollection: CollectionReference,
   config: FirestoreConfig,
 ) {
-  return async (lockConfig: LockConfig): Promise<LockResult> => {
-    const mergedConfig = mergeLockConfig(lockConfig);
-    const lockId = generateLockId();
-    const startTime = Date.now();
-
+  return async (
+    opts: KeyOp & { ttlMs: number },
+  ): Promise<AcquireResult<FirestoreCapabilities>> => {
     try {
-      const result = await withAcquireRetries(
-        async () => {
-          // Check timeout before starting transaction to avoid orphaned locks
-          if (Date.now() - startTime > mergedConfig.timeoutMs) {
-            return {
-              acquired: false,
-              reason: "Acquisition timeout before transaction",
-            } as const;
-          }
+      normalizeAndValidateKey(opts.key);
 
-          const docRef = locksCollection.doc(mergedConfig.key);
-
-          const transactionResult = await db.runTransaction(async (trx) => {
-            const doc = await trx.get(docRef);
-            const currentTime = Date.now();
-            const expiresAt = currentTime + mergedConfig.ttlMs;
-
-            // Final timeout check inside transaction before committing
-            if (currentTime - startTime > mergedConfig.timeoutMs) {
-              return {
-                acquired: false,
-                reason: "Acquisition timeout during transaction",
-              } as const;
-            }
-
-            if (doc.exists) {
-              const data = doc.data() as LockDocument;
-              if (data.expiresAt > currentTime) {
-                return {
-                  acquired: false,
-                  reason: "Lock already held",
-                } as const;
-              }
-              // Lock exists but is expired - we can overwrite it atomically
-            }
-
-            const lockDocument: LockDocument = {
-              lockId,
-              expiresAt,
-              createdAt: currentTime,
-              key: mergedConfig.key,
-            };
-
-            // Use set() to atomically create or overwrite (including expired locks)
-            trx.set(docRef, lockDocument);
-            return { acquired: true, expiresAt } as const;
-          });
-
-          return transactionResult;
-        },
-        config,
-        mergedConfig.timeoutMs,
-      );
-
-      if (result.acquired) {
-        return {
-          success: true,
-          lockId,
-          expiresAt: new Date(result.expiresAt!),
-        };
-      } else {
-        return {
-          success: false,
-          error: result.reason || "Failed to acquire lock",
-        };
+      if (!Number.isInteger(opts.ttlMs) || opts.ttlMs <= 0) {
+        throw new LockError(
+          "InvalidArgument",
+          "ttlMs must be a positive integer",
+        );
       }
+
+      const lockId = generateLockId();
+      const normalizedKey = normalizeAndValidateKey(opts.key);
+      // Firestore document ID limit: 1500 bytes
+      const storageKey = makeStorageKey("", normalizedKey, 1500);
+      const lockDoc = locksCollection.doc(storageKey);
+      const fenceCounterDoc = fenceCounterCollection.doc(storageKey);
+
+      // Transaction ensures atomic read-increment-write of fence counter with lock
+      const result = await db.runTransaction(async (trx) => {
+        // Firestore requirement: all reads before writes
+        const currentLockDoc = await trx.get(lockDoc);
+        const currentCounterDoc = await trx.get(fenceCounterDoc);
+
+        const nowMs = Date.now();
+
+        // Contention check: reject if unexpired lock exists
+        if (currentLockDoc.exists) {
+          const data = currentLockDoc.data() as LockDocument;
+          if (isLive(data.expiresAtMs, nowMs, TIME_TOLERANCE_MS)) {
+            return { ok: false as const, reason: "locked" as const };
+          }
+        }
+
+        // BigInt fence counter: prevents precision loss at high values
+        const currentFenceStr =
+          currentCounterDoc.data()?.fence || "0000000000000000000";
+        const currentFence = BigInt(currentFenceStr);
+        const nextFence = currentFence + BigInt(1);
+
+        // Operational monitoring: warn at 90% of max safe integer
+        const warningThreshold = BigInt("9000000000000000000");
+        if (nextFence > warningThreshold) {
+          console.warn(
+            `[SyncGuard] Fence counter approaching limit for key: ${opts.key}`,
+          );
+        }
+
+        // Max safe integer for Firestore number type
+        const maxValue = BigInt("9223372036854775807");
+        if (nextFence > maxValue) {
+          throw new LockError(
+            "Internal",
+            "Fence counter limit exceeded - contact operations to rotate key namespace",
+          );
+        }
+
+        const nextFenceStr = formatFence(nextFence);
+        const expiresAtMs = nowMs + opts.ttlMs;
+
+        // Atomic write: update fence counter and create lock document
+        const counterDocument: FenceCounterDocument = {
+          fence: nextFenceStr,
+          keyDebug: opts.key,
+        };
+
+        const lockDocument: LockDocument = {
+          lockId,
+          expiresAtMs,
+          acquiredAtMs: nowMs,
+          key: opts.key,
+          fence: nextFenceStr,
+        };
+
+        await trx.set(fenceCounterDoc, counterDocument);
+        await trx.set(lockDoc, lockDocument);
+
+        return { ok: true as const, lockId, expiresAtMs, fence: nextFenceStr };
+      });
+
+      return result;
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
-      return {
-        success: false,
-        error: `Failed to acquire lock "${mergedConfig.key}": ${errorMessage}`,
-      };
+      if (error instanceof LockError) {
+        throw error;
+      }
+      throw mapFirestoreError(error);
     }
   };
 }
