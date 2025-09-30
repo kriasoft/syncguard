@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| < 0.2   | :x:                |
+| 1.0.x   | :white_check_mark: |
+| < 1.0   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -34,8 +34,10 @@ Critical vulnerabilities affecting distributed locking integrity will be priorit
 
 SyncGuard handles distributed locking, which is security-sensitive. Key areas:
 
-- **Lock integrity**: Preventing unauthorized lock acquisition/release
-- **Timing attacks**: Protecting against race conditions in lock operations
+- **Lock integrity**: Preventing unauthorized lock acquisition/release (enforced via cryptographically strong lockIds)
+- **Fencing tokens**: Monotonic counters prevent stale lock holders from corrupting data
+- **TOCTOU protection**: Atomic operations prevent race conditions (ADR-003)
+- **Timing attacks**: 1000ms unified tolerance provides predictable behavior (ADR-005)
 - **Backend security**: Proper configuration of Redis/Firestore credentials
 - **Dependencies**: Regular updates to prevent supply chain attacks
 
@@ -44,10 +46,14 @@ SyncGuard handles distributed locking, which is security-sensitive. Key areas:
 When using SyncGuard:
 
 1. **Secure your backends**: Use proper authentication for Redis/Firestore
-2. **Network security**: Use TLS/SSL for backend connections
-3. **Access control**: Limit who can acquire/release locks
-4. **Monitoring**: Log lock operations for audit trails
+2. **Network security**: Use TLS/SSL for backend connections in production
+3. **Access control**: Limit who can acquire/release locks through backend permissions
+4. **Monitoring**: Use `withTelemetry()` decorator for audit trails (opt-in)
 5. **Key management**: Use non-predictable lock keys when needed
+6. **Fencing tokens**: Use fence tokens to prevent stale writes in critical operations
+7. **Time synchronization**: Ensure NTP sync for Firestore backends (±500ms accuracy)
+8. **Key validation**: Leverage `normalizeAndValidateKey()` and `validateLockId()` helpers
+9. **Error handling**: Catch `LockError` for system failures, handle contention via result types
 
 ## Disclosure Policy
 
@@ -55,6 +61,14 @@ When using SyncGuard:
 - Credit will be given to security researchers (with permission)
 - CVE numbers will be requested for significant vulnerabilities
 
+## Responsible Disclosure
+
+We appreciate security researchers who help keep SyncGuard secure. If you report a valid security issue:
+
+- We'll acknowledge your contribution in the release notes (with your permission)
+- Critical issues affecting lock integrity will receive emergency patches
+- We'll coordinate disclosure timing with you
+
 ---
 
-**This policy may be updated as the project evolves. Last updated: 2025-09-27**
+**This policy may be updated as the project evolves. Last updated: 2025-01-14**
