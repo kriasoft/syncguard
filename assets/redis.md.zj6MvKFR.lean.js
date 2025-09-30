@@ -1,0 +1,1 @@
+import{_ as i,c as a,o as n,ae as t}from"./chunks/framework.Cn1fNm8r.js";const c=JSON.parse('{"title":"Redis Backend","description":"","frontmatter":{},"headers":[],"relativePath":"redis.md","filePath":"redis.md"}'),e={name:"redis.md"};function l(h,s,k,p,r,d){return n(),a("div",null,[...s[0]||(s[0]=[t("",57)])])}const E=i(e,[["render",l]]);export{c as __pageData,E as default};
