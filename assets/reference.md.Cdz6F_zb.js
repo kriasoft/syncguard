@@ -1,0 +1,1 @@
+import{_ as e,c as r,o as t}from"./chunks/framework.CBTkueSR.js";const i=JSON.parse('{"title":"","description":"","frontmatter":{},"headers":[],"relativePath":"reference.md","filePath":"reference.md"}'),a={name:"reference.md"};function c(n,o,s,f,p,_){return t(),r("div")}const m=e(a,[["render",c]]);export{i as __pageData,m as default};

@@ -1,0 +1,37 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.formatOnType": true,
+
+  // Auto-organize imports on save
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit",
+    "source.fixAll": "explicit"
+  },
+
+  // TypeScript/JavaScript import preferences
+  "typescript.preferences.organizeImports": {
+    "semicolons": "insert",
+    "quotes": "double"
+  },
+  "javascript.preferences.organizeImports": {
+    "semicolons": "insert",
+    "quotes": "double"
+  },
+
+  // Auto imports and suggestions
+  "typescript.suggest.autoImports": true,
+  "javascript.suggest.autoImports": true,
+  "typescript.preferences.includePackageJsonAutoImports": "auto",
+
+  // Additional helpful settings
+  "editor.suggestSelection": "first",
+  "editor.suggest.insertMode": "replace",
+  "editor.tabCompletion": "on",
+  "editor.wordBasedSuggestions": "matchingDocuments",
+
+  // File explorer improvements
+  "explorer.sortOrder": "type",
+
+  "cSpell.words": ["firestore", "kriasoft", "syncguard"]
+}
