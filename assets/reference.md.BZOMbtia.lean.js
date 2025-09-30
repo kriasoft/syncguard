@@ -1,0 +1,1 @@
+import{_ as e,c as t,o as r}from"./chunks/framework.ez0Caocs.js";const i=JSON.parse('{"title":"","description":"","frontmatter":{},"headers":[],"relativePath":"reference.md","filePath":"reference.md","lastUpdated":1759230880000}'),a={name:"reference.md"};function c(n,o,s,d,f,p){return r(),t("div")}const m=e(a,[["render",c]]);export{i as __pageData,m as default};
