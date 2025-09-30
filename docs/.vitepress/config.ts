@@ -10,7 +10,8 @@ export default defineConfig({
   lastUpdated: true,
   cleanUrls: true,
   sitemap: {
-    hostname: "https://kriasoft.github.io/syncguard",
+    hostname: "https://kriasoft.com/syncguard/",
+    lastmodDateOnly: false,
   },
   head: [
     ["link", { rel: "icon", href: "/syncguard/favicon.ico" }],
