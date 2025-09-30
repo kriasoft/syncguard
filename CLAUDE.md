@@ -70,6 +70,7 @@ Documentation:
     firestore.md        → Firestore backend implementation requirements
     redis.md            → Redis backend implementation requirements
     adrs.md             → Architectural decision records
+  docs/                 → Documentation site (https://kriasoft.com/syncguard/)
 ```
 
 ## Implementation Requirements
@@ -104,7 +105,7 @@ Assume that:
 
 ### Development workflow
 
-1. **Unit tests**: `bun run test` (fast, mocked dependencies)
+1. **Unit tests**: `bun run test:unit` (fast, mocked dependencies)
 2. **Build/typecheck**: `bun run build && bun run typecheck`
 3. **Integration tests**: `bun run test:integration` (requires Redis)
 4. **Performance validation**: `bun run test:performance` (optional)

@@ -4,7 +4,7 @@
 
 | Test Type       | Command                    | Requirements | Use Case                 |
 | --------------- | -------------------------- | ------------ | ------------------------ |
-| **Unit**        | `bun run test`             | None         | Development, CI/CD       |
+| **Unit**        | `bun run test:unit`        | None         | Development, CI/CD       |
 | **Integration** | `bun run test:integration` | Redis        | End-to-end validation    |
 | **Performance** | `bun run test:performance` | Redis        | Benchmarks, optimization |
 
@@ -12,12 +12,12 @@
 
 ```bash
 # Development (fast)
-bun run test                    # Unit tests only (~100ms)
-bun run test:watch          # Watch mode
+bun run test:unit          # Unit tests only (~100ms)
+bun run test:watch         # Watch mode
 
 # Full validation
-bun run test:integration    # Real Redis required
-bun run test:performance    # Benchmarks
+bun run test:integration   # Real Redis required
+bun run test:performance   # Benchmarks
 bun run test:all           # Everything
 
 # Redis management

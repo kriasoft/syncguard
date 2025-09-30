@@ -49,7 +49,15 @@
     "README.md"
   ],
   "sideEffects": false,
+  "prettier": {
+    "semi": true,
+    "trailingComma": "all",
+    "singleQuote": false,
+    "printWidth": 80,
+    "tabWidth": 2
+  },
   "scripts": {
+    "prepare": "husky",
     "build": "rm -rf ./dist && tsc && cp ./package.json ./LICENSE ./README.md ./dist",
     "dev": "tsc --watch",
     "format": "prettier --write .",
@@ -62,14 +70,17 @@
     "test:watch": "bun test --watch test/unit",
     "redis": "docker run --rm --name redis-test -p 127.0.0.1:6379:6379 --tmpfs /data --health-cmd \"redis-cli ping\" --health-interval 2s --health-timeout 1s --health-retries 10 --health-start-period 0s redis:7-alpine",
     "firestore": "firebase emulators:start --only firestore",
-    "prepare": "husky"
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:deploy": "gh-pages -d docs/.vitepress/dist"
   },
   "lint-staged": {
     "*.{ts,js,json,md}": [
-      "prettier --write"
+      "bun prettier --write"
     ],
     "{common,firestore,redis}/**/*.ts": [
-      "bunx tsc --noEmit --skipLibCheck"
+      "bun tsc --noEmit --skipLibCheck"
     ]
   },
   "exports": {
@@ -110,10 +121,12 @@
     "@google-cloud/firestore": "^7.11.6",
     "@types/bun": "1.2.23",
     "firebase-tools": "^14.17.0",
+    "gh-pages": "^6.3.0",
     "husky": "^9.1.7",
     "ioredis": "^5.8.0",
     "lint-staged": "^16.2.3",
     "prettier": "^3.6.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitepress": "^1.6.4"
   }
 }

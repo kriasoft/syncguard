@@ -29,7 +29,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bun publish --access public
+      - run: bun publish --access public --ignore-scripts
         working-directory: ./dist
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

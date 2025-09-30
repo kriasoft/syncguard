@@ -123,7 +123,7 @@ await lock(workFn, {
 // Firestore
 const lock = createLock(db, {
   collection: "app_locks", // Default: "locks"
-  fenceCollection: "fences", // Default: "fence_counters"
+  fenceCollection: "app_fences", // Default: "fence_counters"
 });
 
 // Redis
@@ -132,7 +132,9 @@ const lock = createLock(redis, {
 });
 ```
 
-**Note:** Firestore requires a single-field index on `lockId` for optimal performance.
+::: warning Firestore Index Required
+Firestore requires a single-field ascending index on the `lockId` field in your locks collection. See [Firestore setup docs](https://kriasoft.com/syncguard/firestore#required-index) for details.
+:::
 
 ## Error Handling
 
@@ -193,9 +195,32 @@ const checkRateLimit = async (userId: string) => {
 };
 ```
 
+## Features
+
+- 🔒 **Bulletproof concurrency** - Atomic operations prevent race conditions
+- 🛡️ **Fencing tokens** - Monotonic counters protect against stale writes
+- 🧹 **Automatic cleanup** - TTL-based expiration, no manual cleanup needed
+- 🔄 **Backend flexibility** - Redis (fast) or Firestore (serverless)
+- 🔁 **Smart retries** - Exponential backoff with jitter handles contention
+- 💙 **TypeScript-first** - Full type safety with compile-time guarantees
+- 📊 **Optional telemetry** - Opt-in observability via decorator pattern
+
+## Contributing
+
+We welcome contributions! Here's how you can help:
+
+- 🐛 **Bug fixes** - Include test cases
+- 🚀 **New backends** - Follow [specs/interface.md](./specs/interface.md)
+- 📖 **Documentation** - Examples, guides, troubleshooting
+- 📋 **Spec reviews** - Validate specs match implementation, propose improvements
+- ✅ **Tests** - Improve coverage
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
+
 ## Support & Documentation
 
-- **Docs**: [Full documentation](https://github.com/kriasoft/syncguard#readme) (coming soon)
+- **Docs**: [Full documentation](https://kriasoft.com/syncguard/)
+- **Specs**: [Technical specifications](./specs/) - Architecture decisions and backend requirements
 - **Discord**: [Join our community](https://discord.gg/EnbEa7Gsxg)
 - **Issues**: [GitHub Issues](https://github.com/kriasoft/syncguard/issues)
 

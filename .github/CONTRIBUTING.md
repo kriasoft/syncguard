@@ -52,24 +52,30 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ### Testing Strategy
 
-- **Unit tests**: `bun run test` - Fast, mocked dependencies
+- **Unit tests**: `bun run test:unit` - Fast, mocked dependencies
 - **Integration tests**: `bun run test:integration` - Requires Redis
 - **Performance tests**: `bun run test:performance` - Optional benchmarks
 
 To run integration tests locally:
 
 ```bash
-bun run redis:start    # Start Redis via Docker
+# Start backends (in separate terminals)
+bun run redis       # Redis on localhost:6379
+bun run firestore   # Firestore emulator on localhost:8080
+
+# Run integration tests
 bun run test:integration
-bun run redis:stop     # Clean up
 ```
 
 ### Code Standards
 
-- **TypeScript**: Strict mode, functional style preferred
-- **Formatting**: Prettier handles this automatically
-- **Exports**: Named exports, tree-shakable modules
-- **Comments**: JSDoc for public APIs only
+- **Functional style**: Pure functions, immutable data, `const` over `let`, avoid classes
+- **TypeScript**: Strict mode, ESNext target, noUncheckedIndexedAccess
+- **Formatting**: Prettier with default config (auto-runs on commit)
+- **Headers**: SPDX license identifiers required
+- **Exports**: Named exports preferred, tree-shakable modules
+- **JSDoc**: Required for all public APIs
+- **Error handling**: Primary API throws `LockError`, manual ops return `LockResult`
 - **Tests**: Cover new functionality, especially edge cases
 
 ## Submitting Changes
@@ -99,31 +105,65 @@ bun run redis:stop     # Clean up
 ## Project Structure
 
 ```bash
-src/
-├── common/         # Core interfaces and utilities
-├── firestore/      # Firestore backend implementation
-├── redis/          # Redis backend implementation
-└── index.ts        # Main exports
+# Source files at project root (not in src/)
+common/             # Core interfaces and utilities
+firestore/          # Firestore backend implementation
+redis/              # Redis backend implementation
+index.ts            # Main exports
 
 test/
 ├── unit/           # Fast unit tests
 ├── integration/    # Backend integration tests
 └── performance/    # Performance benchmarks
+
+docs/               # VitePress documentation site
+specs/              # Technical specifications and ADRs
 ```
 
 ## Types of Contributions
 
-- **Bug fixes**: Always welcome
-- **New backends**: Follow existing backend patterns
-- **Performance improvements**: Include benchmarks
-- **Documentation**: Especially examples and edge cases
+- **Bug fixes**: Always welcome (include test case demonstrating the bug)
+- **New backends**: Follow `specs/interface.md` and existing patterns (Redis/Firestore)
+- **Performance improvements**: Include benchmarks showing improvement
+- **Documentation**: Especially examples, edge cases, and troubleshooting
 - **Tests**: Better coverage is always good
+- **Spec reviews & improvements**: Review `specs/` directory and propose architectural improvements
+  - Identify inconsistencies or ambiguities in specs
+  - Suggest new ADRs for design decisions
+  - Improve spec clarity and completeness
+  - Validate that implementation matches specs
+
+## Design Principles
+
+When contributing, follow these key principles from CLAUDE.md:
+
+- **No over-engineering** - Keep it simple and pragmatic
+- **Design APIs that are predictable, composable, and hard to misuse**
+- **Record decisions in ADRs** (specs/adrs.md) as you go, not retroactively
+- **Make testability a first-class design constraint**
+- **Prioritize correctness and safety over micro-optimizations**
+- **Expose the smallest possible public API that solves the problem**
+
+### Backend Implementation Requirements
+
+If contributing a new backend, ensure:
+
+- [ ] Implements full `LockBackend` interface (specs/interface.md)
+- [ ] Uses `isLive()` from `common/time-predicates.ts` (no custom time logic)
+- [ ] Uses `makeStorageKey()` for key truncation (ADR-006)
+- [ ] Uses `formatFence()` for 19-digit zero-padded fence tokens (ADR-004-R2)
+- [ ] Implements TOCTOU protection for release/extend (ADR-003)
+- [ ] Explicit ownership verification after reverse mapping
+- [ ] Comprehensive unit and integration tests
+- [ ] Backend-specific spec document (follow specs/redis.md or specs/firestore.md pattern)
 
 ## Getting Help
 
-- **Questions**: Open a [discussion](https://github.com/kriasoft/syncguard/discussions) or join our [Discord](https://discord.gg/EnbEa7Gsxg)
-- **Bugs**: Check existing issues first
-- **Ideas**: Start with a discussion before coding
+- **Questions**: Open a [discussion](https://github.com/kriasoft/syncguard/discussions)
+- **Discord**: Join [Kriasoft Discord](https://discord.gg/EnbEa7Gsxg) #syncguard channel
+- **Bugs**: Check [existing issues](https://github.com/kriasoft/syncguard/issues) first
+- **Ideas**: Start with a discussion before coding to align on approach
+- **Documentation**: See [docs site](https://kriasoft.com/syncguard/) and specs/ directory
 
 ## Code of Conduct
 
