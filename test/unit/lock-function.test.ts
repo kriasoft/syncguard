@@ -48,7 +48,7 @@ describe("Lock Function Tests", () => {
             ok: true,
             lockId: "test-lock-id",
             expiresAtMs: Date.now() + 30000,
-            fence: "0000000000000000001",
+            fence: "000000000000001",
           }),
       ),
       release: mock(

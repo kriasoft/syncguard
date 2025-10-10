@@ -48,10 +48,11 @@ export type OwnershipLookup = {
 // ============================================================================
 
 /**
- * Fencing token: 19-digit zero-padded decimal string.
- * Format: "0000000000000000001"
+ * Fencing token: 15-digit zero-padded decimal string (ADR-004).
+ * Format: "000000000000001"
  * Ordering: Lexicographic comparison (fenceA > fenceB)
- * Range: Redis signed 64-bit INCR limit (2^63-1 ≈ 9.2e18)
+ * Range: 10^15 operations ≈ 31.7 years at 1M locks/sec
+ * Precision: Full safety within Lua's 53-bit precision limit (2^53-1 ≈ 9.007e15)
  */
 export type Fence = string;
 
@@ -112,7 +113,7 @@ export type LockInfo<C extends BackendCapabilities> = {
 } & (C["supportsFencing"] extends true ? { fence: Fence } : {});
 
 /**
- * Debug variant with raw identifiers (via lookupDebug helper). SECURITY: Contains sensitive data.
+ * Debug variant with raw identifiers (via getByKeyRaw/getByIdRaw helpers). SECURITY: Contains sensitive data.
  */
 export type LockInfoDebug<C extends BackendCapabilities> = LockInfo<C> & {
   /** Raw key for debugging */

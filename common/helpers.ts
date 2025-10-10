@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2025-present Kriasoft
 // SPDX-License-Identifier: MIT
 
+import { FENCE_THRESHOLDS } from "./constants.js";
 import { hashKey } from "./crypto.js";
+import { LockError } from "./errors.js";
 import type {
   AcquireOk,
   AcquireResult,
@@ -64,7 +66,7 @@ export function sanitizeLockInfo<C extends BackendCapabilities>(
 const RAW_DATA_SYMBOL = Symbol.for("syncguard.rawData");
 
 /**
- * Attaches raw data for debug access via lookupDebug().
+ * Attaches raw data for debug access via getByKeyRaw()/getByIdRaw().
  * @internal Used by backend implementations
  */
 export function attachRawData<C extends BackendCapabilities>(
@@ -79,11 +81,12 @@ export function attachRawData<C extends BackendCapabilities>(
  * Retrieves lock info with raw key/lockId for debugging.
  * WARNING: Contains sensitive identifiers, use only for debugging.
  *
+ * @internal Internal helper used by getByKeyRaw() and getByIdRaw()
  * @param backend - Backend instance
  * @param query - { key } or { lockId }
  * @returns LockInfoDebug with raw fields, or null
  */
-export async function lookupDebug<C extends BackendCapabilities>(
+async function lookupDebug<C extends BackendCapabilities>(
   backend: LockBackend<C>,
   query: { key: string } | { lockId: string },
 ): Promise<LockInfoDebug<C> | null> {
@@ -159,7 +162,7 @@ export function getByKeyRaw<C extends BackendCapabilities>(
   key: string,
   opts?: { signal?: AbortSignal },
 ): Promise<LockInfoDebug<C> | null> {
-  return lookupDebug(backend, { key });
+  return lookupDebug(backend, { key, ...opts });
 }
 
 /**
@@ -171,11 +174,16 @@ export function getByIdRaw<C extends BackendCapabilities>(
   lockId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<LockInfoDebug<C> | null> {
-  return lookupDebug(backend, { lockId });
+  return lookupDebug(backend, { lockId, ...opts });
 }
 
 /**
  * Checks if lockId owns an active lock.
+ *
+ * ⚠️ WARNING: This is for DIAGNOSTIC/UI purposes only, NOT a correctness guard!
+ * Never use `owns() → mutate` patterns. Correctness relies on atomic release/extend
+ * with explicit ownership verification (ADR-003).
+ *
  * @returns true if lockId has an active lock
  */
 export function owns<C extends BackendCapabilities>(
@@ -183,6 +191,42 @@ export function owns<C extends BackendCapabilities>(
   lockId: string,
 ): Promise<boolean> {
   return backend.lookup({ lockId }).then((result) => result !== null);
+}
+
+// ============================================================================
+// Fence Overflow Monitoring
+// ============================================================================
+
+/**
+ * Logs a warning when fence counter approaches overflow limit.
+ * MANDATORY for all backends when fence > FENCE_THRESHOLDS.WARN (ADR-004).
+ *
+ * @param fence - Current fence value (string or number)
+ * @param key - Lock key for context
+ * @internal Used by backend implementations
+ */
+export function logFenceWarning(fence: Fence | number, key: string): void {
+  console.warn(
+    `[SyncGuard] Fence counter approaching limit: fence=${fence}, key=${key}, max=${FENCE_THRESHOLDS.MAX}`,
+  );
+}
+
+// ============================================================================
+// AbortSignal Support
+// ============================================================================
+
+/**
+ * Checks if an AbortSignal has been aborted and throws LockError if so.
+ * Use this to provide cancellation points in long-running operations.
+ *
+ * @param signal - Optional AbortSignal to check
+ * @throws LockError with code "Aborted" if signal is aborted
+ * @internal Used by backend implementations
+ */
+export function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new LockError("Aborted", "Operation aborted by signal");
+  }
 }
 
 // ============================================================================

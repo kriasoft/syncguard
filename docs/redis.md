@@ -3,7 +3,7 @@
 High-performance distributed locking using Redis as the backend. Ideal for sub-millisecond latency requirements and high-throughput scenarios.
 
 ::: tip Technical Specifications
-For backend implementers: See [specs/redis.md](https://github.com/kriasoft/syncguard/blob/main/specs/redis.md) for complete implementation requirements, Lua script patterns, and architecture decisions.
+For backend implementers: See [specs/redis-backend.md](https://github.com/kriasoft/syncguard/blob/main/specs/redis-backend.md) for complete implementation requirements, Lua script patterns, and architecture decisions.
 :::
 
 ## Installation
@@ -161,6 +161,8 @@ const processJob = async (jobId: string) => {
 ### Long-Running Tasks with Heartbeat
 
 ```ts
+import { owns } from "syncguard";
+
 const backend = createRedisBackend(redis);
 const result = await backend.acquire({ key: "batch:report", ttlMs: 60000 });
 
@@ -182,6 +184,27 @@ if (result.ok) {
     clearInterval(heartbeat);
     await backend.release({ lockId });
   }
+}
+```
+
+### Monitoring Lock Status
+
+```ts
+import { getByKey, getById } from "syncguard";
+
+// Check if a resource is currently locked
+const info = await getByKey(backend, "resource:123");
+if (info) {
+  console.log(`Resource locked until ${new Date(info.expiresAtMs)}`);
+  console.log(`Fence token: ${info.fence}`);
+}
+
+// Check if you still own a lock
+const owned = await getById(backend, lockId);
+if (owned) {
+  console.log(
+    `Still own the lock, expires in ${owned.expiresAtMs - Date.now()}ms`,
+  );
 }
 ```
 
@@ -238,7 +261,7 @@ redis-cli --scan --pattern "syncguard:fence:*" | wc -l
 For applications generating >10M unique lock keys annually, consider key normalization.
 
 ::: info Fence Counter Lifecycle
-Fence counters are intentionally persistent. See [specs/redis.md § Fence Key Lifecycle](https://github.com/kriasoft/syncguard/blob/main/specs/redis.md#fence-key-lifecycle-and-memory-considerations) for the complete rationale and operational guidance.
+Fence counters are intentionally persistent. See [specs/redis-backend.md § Fence Key Lifecycle](https://github.com/kriasoft/syncguard/blob/main/specs/redis-backend.md#fence-key-lifecycle-and-memory-considerations) for the complete rationale and operational guidance.
 :::
 
 ::: tip Performance Tip

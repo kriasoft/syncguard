@@ -96,20 +96,21 @@ if (result.ok) {
 - **Concurrent safety** — Two processes acquiring locks on the same key get different lock IDs
 - **Explicit ownership** — Operations require proof of ownership via `lockId`
 
-**Checking ownership**:
+**Checking ownership** — Use the helper functions for better discoverability:
 
 ```typescript
 import { owns, getById } from "syncguard";
 
-// Quick boolean check
+// Quick boolean check - simple and clear
 if (await owns(backend, lockId)) {
   console.log("Still own the lock");
 }
 
-// Detailed info
+// Detailed info - includes expiration and fence tokens
 const info = await getById(backend, lockId);
 if (info) {
   console.log(`Expires in ${info.expiresAtMs - Date.now()}ms`);
+  console.log(`Fence token: ${info.fence}`);
 }
 ```
 
@@ -255,9 +256,13 @@ try {
 
 ## Ownership Checking
 
-Check lock status and ownership without side effects:
+::: warning Diagnostic Use Only
+Ownership checks are for **diagnostics, UI, and monitoring** — NOT correctness guards. Never use `check → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations.
+:::
 
-**Check if resource is locked**:
+**Recommended approach** — Use the helper functions for clarity and discoverability:
+
+**Check if a resource is locked**:
 
 ```typescript
 import { getByKey } from "syncguard";
@@ -267,42 +272,46 @@ if (info) {
   console.log(`Locked until ${new Date(info.expiresAtMs)}`);
   console.log(`Fence token: ${info.fence}`);
 } else {
-  console.log("Not locked");
+  console.log("Resource is available");
 }
 ```
 
 **Check if you still own a lock**:
 
 ```typescript
-import { owns } from "syncguard";
+import { owns, getById } from "syncguard";
 
+// Simple boolean check
 const stillOwned = await owns(backend, lockId);
 if (!stillOwned) {
   throw new Error("Lost lock ownership");
 }
+
+// Or get detailed information
+const info = await getById(backend, lockId);
+if (info) {
+  console.log(
+    `Still own the lock, expires in ${info.expiresAtMs - Date.now()}ms`,
+  );
+}
 ```
 
-**Advanced: Direct lookup method**:
-
-```typescript
-// By key (O(1) direct access)
-const info = await backend.lookup({ key: "resource:123" });
-
-// By lockId (reverse index lookup)
-const info = await backend.lookup({ lockId });
-```
-
-::: info Security Note
-`lookup()` returns sanitized data with hashed keys/lockIds. For debugging with raw values, use `getByKeyRaw()` or `getByIdRaw()` helpers.
+::: tip Helper Functions vs Direct Method
+The helpers (`getByKey`, `getById`, `owns`) provide better discoverability and clearer intent than calling `backend.lookup()` directly. They're the **recommended approach** for lock diagnostics. For advanced cases, you can still use `backend.lookup({ key })` or `backend.lookup({ lockId })` directly.
 :::
 
-**When to use lookup**:
+::: info Security Note
+Helpers return sanitized data with hashed keys/lockIds by default. For debugging with raw values, use `getByKeyRaw()` or `getByIdRaw()` helpers.
+:::
+
+**When to use ownership checking**:
 
 - ✅ **Diagnostics**: "Why is this resource locked?"
 - ✅ **Monitoring**: Track lock expiration times
 - ✅ **Conditional logic**: "Should I wait or skip?"
+- ✅ **UI display**: Show lock status to users
 
-**When NOT to use lookup**:
+**When NOT to use ownership checking**:
 
 - ❌ Pre-checking before `extend()` or `release()` (operations are idempotent)
 - ❌ Gating mutations (use fencing tokens instead, see [Fencing Tokens](/fencing))

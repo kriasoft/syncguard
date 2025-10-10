@@ -41,8 +41,9 @@ describe("Redis Backend Unit Tests", () => {
     it("should successfully acquire available lock", async () => {
       const mockEval = mockRedis.eval as ReturnType<typeof mock>;
 
-      // Redis Lua script returns [1, fence] for successful lock acquisition
-      mockEval.mockResolvedValueOnce([1, "0000000000000000001"]);
+      // Redis Lua script returns [1, fence, expiresAtMs] for successful lock acquisition
+      const expiresAtMs = Date.now() + 30000;
+      mockEval.mockResolvedValueOnce([1, "000000000000001", expiresAtMs]);
 
       const result = await backend.acquire({
         key: "resource:users:123",
@@ -57,7 +58,7 @@ describe("Redis Backend Unit Tests", () => {
         expect(result.lockId.length).toBeGreaterThan(0);
         expect(typeof result.expiresAtMs).toBe("number");
         expect(result.expiresAtMs).toBeGreaterThan(Date.now());
-        expect(result.fence).toBe("0000000000000000001");
+        expect(result.fence).toBe("000000000000001");
       }
 
       // Verify Redis was called with correct parameters
@@ -94,8 +95,9 @@ describe("Redis Backend Unit Tests", () => {
       const mockEval = mockRedis.eval as ReturnType<typeof mock>;
 
       // Mock two successful acquisitions
-      mockEval.mockResolvedValueOnce([1, "0000000000000000001"]);
-      mockEval.mockResolvedValueOnce([1, "0000000000000000002"]);
+      const expiresAtMs = Date.now() + 30000;
+      mockEval.mockResolvedValueOnce([1, "000000000000001", expiresAtMs]);
+      mockEval.mockResolvedValueOnce([1, "000000000000002", expiresAtMs]);
 
       const [result1, result2] = await Promise.all([
         backend.acquire({ key: "resource:batch:1", ttlMs: 30000 }),
@@ -128,9 +130,10 @@ describe("Redis Backend Unit Tests", () => {
 
     it("should respect custom TTL and timeout values", async () => {
       const mockEval = mockRedis.eval as ReturnType<typeof mock>;
-      mockEval.mockResolvedValueOnce([1, "0000000000000000001"]);
-
       const customTtl = 60000; // 1 minute
+      const expiresAtMs = Date.now() + customTtl;
+      mockEval.mockResolvedValueOnce([1, "000000000000001", expiresAtMs]);
+
       const result = await backend.acquire({
         key: "resource:custom-ttl",
         ttlMs: customTtl,
@@ -163,13 +166,12 @@ describe("Redis Backend Unit Tests", () => {
 
       expect(result.ok).toBe(true);
 
-      // Verify Redis was called with correct parameters
+      // ADR-013: Verify Redis was called with correct parameters (no keyPrefix)
       expect(mockEval).toHaveBeenCalledTimes(1);
       const callArgs = mockEval.mock.calls[0]!;
-      expect(callArgs[1]).toBe(2); // Number of keys (lockIdKey, keyPrefix)
+      expect(callArgs[1]).toBe(1); // Number of keys (lockIdKey only, no keyPrefix)
       expect(callArgs[2]).toBe(`test:id:${lockId}`); // Lock ID index key
-      expect(callArgs[3]).toBe("test"); // Key prefix
-      expect(callArgs[4]).toBe(lockId); // Lock ID argument
+      expect(callArgs[3]).toBe(lockId); // Lock ID argument
     });
 
     it("should handle release of non-existent lock", async () => {
@@ -252,15 +254,14 @@ describe("Redis Backend Unit Tests", () => {
         expect(result.expiresAtMs).toBe(newExpiresAtMs);
       }
 
-      // Verify Redis was called with correct parameters per spec
+      // ADR-013: Verify Redis was called with correct parameters (no keyPrefix)
       expect(mockEval).toHaveBeenCalledTimes(1);
       const callArgs = mockEval.mock.calls[0]!;
-      expect(callArgs[1]).toBe(2); // Number of keys (lockIdKey + keyPrefix)
+      expect(callArgs[1]).toBe(1); // Number of keys (lockIdKey only, no keyPrefix)
       expect(callArgs[2]).toBe(`test:id:${lockId}`); // KEYS[1]: Lock ID index key
-      expect(callArgs[3]).toBe("test"); // KEYS[2]: keyPrefix
-      expect(callArgs[4]).toBe(lockId); // ARGV[1]: Lock ID
-      expect(callArgs[5]).toBe("1000"); // ARGV[2]: toleranceMs
-      expect(callArgs[6]).toBe("120000"); // ARGV[3]: TTL in milliseconds
+      expect(callArgs[3]).toBe(lockId); // ARGV[1]: Lock ID
+      expect(callArgs[4]).toBe("1000"); // ARGV[2]: toleranceMs
+      expect(callArgs[5]).toBe("120000"); // ARGV[3]: TTL in milliseconds
     });
 
     it("should fail to extend expired or non-existent lock", async () => {
@@ -314,10 +315,10 @@ describe("Redis Backend Unit Tests", () => {
         ).ok,
       ).toBe(true); // 1 hour
 
-      // Verify TTL is passed in milliseconds as ARGV[3] per spec
+      // ADR-013: Verify TTL is passed in milliseconds as ARGV[3] (adjusted for no keyPrefix)
       const calls = mockEval.mock.calls;
-      expect(calls[0]![6]).toBe("1000"); // ARGV[3]: 1000ms
-      expect(calls[1]![6]).toBe("3600000"); // ARGV[3]: 3600000ms
+      expect(calls[0]![5]).toBe("1000"); // ARGV[3]: 1000ms
+      expect(calls[1]![5]).toBe("3600000"); // ARGV[3]: 3600000ms
     });
 
     it("should handle Redis errors during extension", async () => {

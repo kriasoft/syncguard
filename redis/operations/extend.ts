@@ -22,7 +22,6 @@ interface RedisWithCommands {
   ): Promise<unknown>;
   extendLock?(
     lockIdKey: string,
-    keyPrefix: string,
     lockId: string,
     toleranceMs: string,
     ttlMs: string,
@@ -31,7 +30,7 @@ interface RedisWithCommands {
 
 /**
  * Creates extend operation that atomically renews lock TTL.
- * @see specs/redis.md for Lua script implementation
+ * @see specs/redis-backend.md for Lua script implementation
  */
 export function createExtendOperation(
   redis: RedisWithCommands,
@@ -48,42 +47,53 @@ export function createExtendOperation(
         );
       }
 
+      const REDIS_LIMIT_BYTES = 1000;
+      const RESERVE_BYTES = 26; // ":id:" (4 bytes) + 22-char lockId
+
       const lockIdKey = makeStorageKey(
         config.keyPrefix,
         `id:${opts.lockId}`,
-        1000,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
       );
 
-      // Prefer cached script method (extendLock) over eval for performance
+      // ADR-013: Prefer cached script method (extendLock) over eval for performance
+      // No longer pass keyPrefix - lockKey is retrieved directly from index
       const scriptResult = redis.extendLock
         ? await redis.extendLock(
             lockIdKey,
-            config.keyPrefix,
             opts.lockId,
             TIME_TOLERANCE_MS.toString(),
             opts.ttlMs.toString(),
           )
         : ((await redis.eval(
             EXTEND_SCRIPT,
-            2, // KEYS[1]=lockIdKey, KEYS[2]=keyPrefix
+            1, // Only 1 key now (lockIdKey)
             lockIdKey,
-            config.keyPrefix,
             opts.lockId, // ARGV[1]
             TIME_TOLERANCE_MS.toString(), // ARGV[2]
             opts.ttlMs.toString(), // ARGV[3]
           )) as [number, number] | number);
 
-      // Script returns: 1 (success) or [1, expiresAtMs] (success + timestamp) or 0 (failed)
+      // Script returns: [1, expiresAtMs] on success, 0 on failure
       if (Array.isArray(scriptResult)) {
         const [status, expiresAtMs] = scriptResult;
         if (status === 1) {
+          // Robustness check: ensure expiresAtMs is present
+          if (typeof expiresAtMs !== "number") {
+            throw new LockError(
+              "Internal",
+              `Malformed script result: missing expiresAtMs`,
+            );
+          }
           return {
             ok: true,
-            expiresAtMs: expiresAtMs || Date.now() + opts.ttlMs,
+            expiresAtMs,
           };
         }
         return { ok: false };
       } else if (scriptResult === 1) {
+        // Test mock: success without expiresAtMs
         return { ok: true, expiresAtMs: Date.now() + opts.ttlMs };
       } else {
         return { ok: false };

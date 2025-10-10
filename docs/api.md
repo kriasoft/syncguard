@@ -296,7 +296,7 @@ if (locked) {
 
 ### `backend.lookup()`
 
-Detailed lock information for diagnostics and ownership checks.
+Lower-level diagnostic method for detailed lock information.
 
 ```typescript
 // By key (O(1) direct access)
@@ -305,6 +305,10 @@ lookup(opts: { key: string; signal?: AbortSignal }): Promise<LockInfo<C> | null>
 // By lockId (reverse lookup + verification)
 lookup(opts: { lockId: string; signal?: AbortSignal }): Promise<LockInfo<C> | null>;
 ```
+
+::: info Prefer Helper Functions
+For better discoverability and clearer intent, use the diagnostic helpers instead: `getByKey()`, `getById()`, and `owns()`. These provide a more ergonomic API while calling `lookup()` internally. See [Diagnostics & Helpers](#diagnostics-helpers) for recommended usage patterns.
+:::
 
 **Usage:**
 
@@ -334,9 +338,10 @@ if (owned) {
 - For raw data access, use `getByKeyRaw()` or `getByIdRaw()` helpers
 - Read-only operation (no side effects)
 - Includes `fence` for fencing-capable backends
+- **Atomicity:** Redis uses atomic Lua scripts for lockId lookup (multi-key reads); Firestore uses non-atomic indexed queries with post-read verification (per ADR-011, both approaches ensure portability for diagnostic use)
 
-::: info Prefer Helpers
-For clearer intent, use `owns()`, `getByKey()`, or `getById()` helpers instead of calling `lookup()` directly. See [Diagnostics & Helpers](#diagnostics-helpers).
+::: warning Diagnostic Use Only
+Lookup is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `lookup() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations (ADR-003).
 :::
 
 ---
@@ -458,7 +463,7 @@ type LockInfo<C extends BackendCapabilities> = {
 
 ### `LockInfoDebug<C>`
 
-Extended lock info with raw keys/lockIds (via `lookupDebug()` helper).
+Extended lock info with raw keys/lockIds (via `getByKeyRaw()`/`getByIdRaw()` helpers).
 
 ```typescript
 interface LockInfoDebug<C extends BackendCapabilities> extends LockInfo<C> {
@@ -471,10 +476,10 @@ interface LockInfoDebug<C extends BackendCapabilities> extends LockInfo<C> {
 
 ### `Fence`
 
-Fencing token type (19-digit zero-padded string).
+Fencing token type (15-digit zero-padded string per ADR-004).
 
 ```typescript
-type Fence = string; // e.g., "0000000000000000001"
+type Fence = string; // e.g., "000000000000001"
 ```
 
 **Properties:**
@@ -482,13 +487,14 @@ type Fence = string; // e.g., "0000000000000000001"
 - Lexicographic ordering matches chronological order
 - Direct string comparison works: `fenceA > fenceB`
 - JSON-safe (no BigInt precision issues)
-- Cross-backend consistent format
+- Cross-backend consistent format (15 digits)
+- Guarantees full safety within Lua's 53-bit precision (2^53-1 ≈ 9.007e15)
 
 **Usage:**
 
 ```typescript
-const fences = ["0000000000000000003", "0000000000000000001"];
-const sorted = fences.sort(); // ["001", "003"] - lexicographic = chronological
+const fences = ["000000000000003", "000000000000001"];
+const sorted = fences.sort(); // ["000000000000001", "000000000000003"] - lexicographic = chronological
 
 if (newFence > storedFence) {
   // Accept write from newer lock holder
@@ -647,38 +653,11 @@ See [Firestore Backend](/firestore#backend-configuration) for details.
 
 ## Diagnostics & Helpers
 
-Ergonomic functions for common lock inspection patterns.
-
-### `owns()`
-
-Quick boolean ownership check.
-
-```typescript
-function owns<C extends BackendCapabilities>(
-  backend: LockBackend<C>,
-  lockId: string,
-): Promise<boolean>;
-```
-
-**Usage:**
-
-```typescript
-import { owns } from "syncguard";
-
-if (await owns(backend, lockId)) {
-  console.log("Still own the lock");
-} else {
-  throw new Error("Lost ownership");
-}
-```
-
-**Equivalent to:** `!!(await backend.lookup({ lockId }))`
-
----
+**Recommended diagnostic API** — These helper functions provide the most ergonomic way to inspect lock state. They offer better discoverability and clearer intent than calling `backend.lookup()` directly.
 
 ### `getByKey()`
 
-Lookup lock by resource key (sanitized data).
+Lookup lock by resource key (sanitized data). **Primary method** for checking resource lock status.
 
 ```typescript
 function getByKey<C extends BackendCapabilities>(
@@ -697,14 +676,18 @@ const info = await getByKey(backend, "resource:123");
 if (info) {
   console.log(`Lock expires in ${info.expiresAtMs - Date.now()}ms`);
   console.log(`Fence: ${info.fence}`);
+} else {
+  console.log("Resource is not locked");
 }
 ```
+
+**Use this when:** You need to check if a resource is locked and get detailed information about the lock holder.
 
 ---
 
 ### `getById()`
 
-Lookup lock by lockId (sanitized data).
+Lookup lock by lockId (sanitized data). **Primary method** for checking lock ownership.
 
 ```typescript
 function getById<C extends BackendCapabilities>(
@@ -722,8 +705,52 @@ import { getById } from "syncguard";
 const info = await getById(backend, lockId);
 if (info) {
   console.log("Own the lock, fence:", info.fence);
+  console.log(`Expires in ${info.expiresAtMs - Date.now()}ms`);
+} else {
+  console.log("No longer own the lock");
 }
 ```
+
+**Use this when:** You need detailed information about a lock you're holding, including expiration time and fence tokens.
+
+---
+
+### `owns()`
+
+Quick boolean ownership check. **Simplified method** for yes/no ownership questions.
+
+```typescript
+function owns<C extends BackendCapabilities>(
+  backend: LockBackend<C>,
+  lockId: string,
+): Promise<boolean>;
+```
+
+::: warning Diagnostic Use Only
+This is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `owns() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations (ADR-003).
+:::
+
+**Usage:**
+
+```typescript
+import { owns } from "syncguard";
+
+if (await owns(backend, lockId)) {
+  console.log("Still own the lock");
+} else {
+  console.log("Lost ownership");
+}
+```
+
+**Use this when:** You only need a boolean answer about ownership and don't need additional details.
+
+**Equivalent to:** `!!(await backend.lookup({ lockId }))`
+
+---
+
+::: tip Lower-Level Access
+These helpers call `backend.lookup()` internally. For advanced use cases requiring direct access to the backend method, you can use `backend.lookup({ key })` or `backend.lookup({ lockId })` directly.
+:::
 
 ---
 
@@ -767,35 +794,6 @@ function getByIdRaw<C extends BackendCapabilities>(
   lockId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<LockInfoDebug<C> | null>;
-```
-
----
-
-### `lookupDebug()`
-
-Advanced lookup with raw data access.
-
-```typescript
-function lookupDebug<C extends BackendCapabilities>(
-  backend: LockBackend<C>,
-  query: { key: string } | { lockId: string },
-): Promise<LockInfoDebug<C> | null>;
-```
-
-**Usage:**
-
-```typescript
-import { lookupDebug } from "syncguard";
-
-// By key
-const debug = await lookupDebug(backend, { key: "resource:123" });
-
-// By lockId
-const debug = await lookupDebug(backend, { lockId });
-
-if (debug) {
-  console.log("Raw data:", debug.key, debug.lockId);
-}
 ```
 
 ---
@@ -853,15 +851,16 @@ try {
 
 **Error codes:**
 
-| Code                 | Cause                              | Action                                |
-| -------------------- | ---------------------------------- | ------------------------------------- |
-| `AcquisitionTimeout` | Exceeded `timeoutMs` after retries | Reduce contention or increase timeout |
-| `ServiceUnavailable` | Backend unavailable                | Retry with backoff                    |
-| `NetworkTimeout`     | Client/network timeout             | Check network connectivity            |
-| `InvalidArgument`    | Malformed key/lockId               | Validate input parameters             |
-| `AuthFailed`         | Authentication failure             | Check credentials                     |
-| `RateLimited`        | Backend rate limiting              | Implement backoff                     |
-| `Internal`           | Unexpected backend error           | Check logs, report if persistent      |
+| Code                 | Cause                               | Action                                |
+| -------------------- | ----------------------------------- | ------------------------------------- |
+| `AcquisitionTimeout` | Exceeded `timeoutMs` after retries  | Reduce contention or increase timeout |
+| `ServiceUnavailable` | Backend unavailable                 | Retry with backoff                    |
+| `NetworkTimeout`     | Client/network timeout              | Check network connectivity            |
+| `InvalidArgument`    | Malformed key/lockId                | Validate input parameters             |
+| `AuthFailed`         | Authentication failure              | Check credentials                     |
+| `RateLimited`        | Backend rate limiting               | Implement backoff                     |
+| `Aborted`            | Operation cancelled via AbortSignal | User-initiated cancellation           |
+| `Internal`           | Unexpected backend error            | Check logs, report if persistent      |
 
 **Notes:**
 

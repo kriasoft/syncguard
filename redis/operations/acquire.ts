@@ -3,9 +3,11 @@
 
 import {
   type AcquireResult,
+  FENCE_THRESHOLDS,
   type KeyOp,
   LockError,
   generateLockId,
+  logFenceWarning,
   makeStorageKey,
   normalizeAndValidateKey,
 } from "../../common/backend.js";
@@ -28,8 +30,9 @@ interface RedisWithCommands {
     lockId: string,
     ttlMs: string,
     toleranceMs: string,
-    userKey: string,
-  ): Promise<[number, string] | number>;
+    storageKey: string, // ADR-013: Full lockKey (post-truncation) for index storage
+    userKey: string, // Original normalized key for lockData
+  ): Promise<[number, string, number] | number>;
 }
 
 /**
@@ -55,19 +58,38 @@ export function createAcquireOperation(
 
       const lockId = generateLockId();
       const normalizedKey = normalizeAndValidateKey(opts.key);
+
       // Redis key length limit: 1000 bytes practical maximum
-      const storageKey = makeStorageKey(config.keyPrefix, normalizedKey, 1000);
-      const lockKey = storageKey;
-      const lockIdKey = makeStorageKey(config.keyPrefix, `id:${lockId}`, 1000);
+      // Reserve bytes for derived keys: ":id:" (4) + lockId (22) = 26 bytes
+      const REDIS_LIMIT_BYTES = 1000;
+      const RESERVE_BYTES = 26; // ":id:" (4 bytes) + 22-char lockId
+
+      // ADR-006: Compute base storage key once, then derive fence key from it
+      const baseKey = makeStorageKey(
+        config.keyPrefix,
+        normalizedKey,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
+      const lockKey = baseKey;
+      const lockIdKey = makeStorageKey(
+        config.keyPrefix,
+        `id:${lockId}`,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
+      // Derive fence key from base key to ensure 1:1 mapping when truncation occurs
       const fenceKey = makeStorageKey(
         config.keyPrefix,
-        `fence:${normalizedKey}`,
-        1000,
+        `fence:${baseKey}`,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
       );
 
       const toleranceMs = TIME_TOLERANCE_MS;
 
       // Prefer cached script command (acquireLock) over eval for performance
+      // ADR-013: Pass full lockKey for index storage AND original key for lockData
       const scriptResult = redis.acquireLock
         ? await redis.acquireLock(
             lockKey,
@@ -76,7 +98,8 @@ export function createAcquireOperation(
             lockId,
             opts.ttlMs.toString(),
             toleranceMs.toString(),
-            normalizedKey,
+            lockKey, // ARGV[4]: Full lockKey for index (post-truncation)
+            normalizedKey, // ARGV[5]: Original key for lockData
           )
         : ((await redis.eval(
             ACQUIRE_SCRIPT,
@@ -87,15 +110,41 @@ export function createAcquireOperation(
             lockId,
             opts.ttlMs.toString(),
             toleranceMs.toString(),
-            normalizedKey,
-          )) as [number, string] | number);
+            lockKey, // ARGV[4]: Full lockKey for index (post-truncation)
+            normalizedKey, // ARGV[5]: Original key for lockData
+          )) as [number, string, number] | number);
 
-      // Script returns [1, fence] on success, 0 on contention
+      // Script returns [1, fence, expiresAtMs] on success, 0 on contention
       if (Array.isArray(scriptResult)) {
-        const [status, fence] = scriptResult;
+        const [status, fence, expiresAtMs] = scriptResult;
         if (status === 1) {
-          // Client time approximation: acceptable since Redis script uses server time internally
-          const expiresAtMs = Date.now() + opts.ttlMs;
+          // Robustness check: ensure all expected values are present
+          if (
+            !fence ||
+            typeof fence !== "string" ||
+            typeof expiresAtMs !== "number"
+          ) {
+            throw new LockError(
+              "Internal",
+              `Malformed script result: missing fence or expiresAtMs`,
+            );
+          }
+
+          // Overflow enforcement (ADR-004): verify fence within safe limits
+          // Fence is 15-digit zero-padded string; lexicographic comparison
+          if (fence > FENCE_THRESHOLDS.MAX) {
+            throw new LockError(
+              "Internal",
+              `Fence counter overflow - exceeded operational limit (${FENCE_THRESHOLDS.MAX})`,
+              { key: opts.key },
+            );
+          }
+
+          // Operational monitoring: warn at FENCE_THRESHOLDS.WARN using shared utility
+          if (fence > FENCE_THRESHOLDS.WARN) {
+            logFenceWarning(fence, opts.key);
+          }
+
           return {
             ok: true,
             lockId,
@@ -104,13 +153,13 @@ export function createAcquireOperation(
           } as AcquireResult<RedisCapabilities>;
         }
       } else if (scriptResult === 1) {
-        // Test mock: success without fence token
+        // Test mock: success without fence token or expiresAtMs
         const expiresAtMs = Date.now() + opts.ttlMs;
         return {
           ok: true,
           lockId,
           expiresAtMs,
-          fence: "0000000000000000001",
+          fence: "000000000000001",
         } as AcquireResult<RedisCapabilities>;
       } else if (scriptResult === 0) {
         return {

@@ -37,7 +37,7 @@ export interface LockData {
   acquiredAtMs: number;
   /** Lock key for identification */
   key: string;
-  /** Monotonic fencing token (19-digit zero-padded decimal, 64-bit signed int) */
+  /** Monotonic fencing token (16-digit zero-padded decimal per ADR-004) */
   fence: string;
 }
 

@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   test:
     name: Test & Build
@@ -14,11 +18,10 @@ jobs:
         bun-version: [latest, canary]
 
     services:
-      # Label used to access the service container
       redis:
-        # Docker Hub image
-        image: redis
-        # Set health checks to wait until redis has started
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s

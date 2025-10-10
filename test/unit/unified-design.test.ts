@@ -91,31 +91,31 @@ describe("Unified Design Tests", () => {
   });
 
   describe("Fence Token Consistency", () => {
-    it("should enforce 19-digit zero-padded fence format", () => {
-      // Per spec: ALL fence tokens MUST be exactly 19 digits with zero-padding
+    it("should enforce 15-digit zero-padded fence format (ADR-004)", () => {
+      // Per ADR-004: ALL fence tokens MUST be exactly 15 digits with zero-padding
       const validFences = [
-        "0000000000000000001",
-        "0000000000000000042",
-        "0000000000000001337",
-        "0000000000123456789",
-        "1234567890123456789", // Maximum 19-digit value
+        "000000000000001",
+        "000000000000042",
+        "000000000001337",
+        "000000123456789",
+        "999999999999999", // Maximum 15-digit value
       ];
 
       const invalidFences = [
         "1", // Too short
+        "0000000000000001", // 16 digits (old format, now invalid)
         "00000000000000001", // 17 digits
-        "000000000000000001", // 18 digits
-        "12345678901234567890", // 20 digits
-        "abc0000000000000001", // Non-numeric
-        " 0000000000000000001", // Leading whitespace
+        "0000000000000000001", // 19 digits (original format, now invalid)
+        "abc000000000001", // Non-numeric
+        " 000000000000001", // Leading whitespace
       ];
 
-      // Regex per spec line 1178: /^\d{19}$/
-      const fenceFormatRegex = /^\d{19}$/;
+      // Regex per ADR-004: /^\d{15}$/
+      const fenceFormatRegex = /^\d{15}$/;
 
       validFences.forEach((fence) => {
         expect(fence).toMatch(fenceFormatRegex);
-        expect(fence.length).toBe(19);
+        expect(fence.length).toBe(15);
       });
 
       invalidFences.forEach((fence) => {
@@ -128,7 +128,7 @@ describe("Unified Design Tests", () => {
         ok: true as const,
         lockId: "test-lock-id",
         expiresAtMs: Date.now() + 30000,
-        fence: "0000000000000000001",
+        fence: "000000000000001",
       };
 
       const successWithoutFence = {
@@ -158,7 +158,7 @@ describe("Unified Design Tests", () => {
         ok: true as const,
         lockId: "test-lock-id",
         expiresAtMs: Date.now() + 30000,
-        fence: "0000000000000000001",
+        fence: "000000000000001",
       };
 
       const successWithoutFence = {
@@ -180,21 +180,21 @@ describe("Unified Design Tests", () => {
       expect(hasFence(failure)).toBe(false);
     });
 
-    it("should support lexicographic fence comparison", () => {
-      // 19-digit zero-padded fence tokens for consistent ordering
-      const fence1 = "0000000000000000001";
-      const fence2 = "0000000000000000002";
-      const fence10 = "0000000000000000010";
+    it("should support lexicographic fence comparison (ADR-004)", () => {
+      // 15-digit zero-padded fence tokens for consistent ordering
+      const fence1 = "000000000000001";
+      const fence2 = "000000000000002";
+      const fence10 = "000000000000010";
 
       // String comparison should work correctly with zero-padding
       expect(fence1 < fence2).toBe(true);
       expect(fence2 < fence10).toBe(true);
       expect(fence10 > fence1).toBe(true);
 
-      // Verify 19-digit format
-      expect(fence1.length).toBe(19);
-      expect(fence2.length).toBe(19);
-      expect(fence10.length).toBe(19);
+      // Verify 15-digit format per ADR-004
+      expect(fence1.length).toBe(15);
+      expect(fence2.length).toBe(15);
+      expect(fence10.length).toBe(15);
     });
   });
 
@@ -203,8 +203,9 @@ describe("Unified Design Tests", () => {
       const prefix = "test";
       const userKey = "resource:123";
       const limit = 1000;
+      const reserve = 0;
 
-      const result = makeStorageKey(prefix, userKey, limit);
+      const result = makeStorageKey(prefix, userKey, limit, reserve);
       expect(result).toBe("test:resource:123");
     });
 
@@ -212,8 +213,10 @@ describe("Unified Design Tests", () => {
       const prefix = "test:";
       const userKey = "resource:456";
       const limit = 1000;
+      const reserve = 0;
 
-      const result = makeStorageKey(prefix, userKey, limit);
+      const result = makeStorageKey(prefix, userKey, limit, reserve);
+      // Trailing colons are stripped from prefix for consistency
       expect(result).toBe("test:resource:456");
     });
 
@@ -221,26 +224,28 @@ describe("Unified Design Tests", () => {
       const prefix = "prefix";
       const userKey = "x".repeat(500); // Long key
       const limit = 100; // Limit that requires truncation
+      const reserve = 0;
 
-      const result = makeStorageKey(prefix, userKey, limit);
+      const result = makeStorageKey(prefix, userKey, limit, reserve);
 
-      // Result should be truncated with hash: prefix:24-char-hash
+      // Result should be truncated with hash: prefix:22-char-base64url (128-bit hash)
       expect(result.length).toBeLessThanOrEqual(limit);
       expect(result.startsWith("prefix:")).toBe(true);
 
-      // Hash should be exactly 24 hex characters (96 bits per spec)
+      // Hash should be exactly 22 base64url characters (128 bits per updated spec)
       const hashPart = result.substring(7); // After "prefix:"
-      expect(hashPart.length).toBe(24);
-      expect(hashPart).toMatch(/^[0-9a-f]{24}$/);
+      expect(hashPart.length).toBe(22);
+      expect(hashPart).toMatch(/^[A-Za-z0-9_-]{22}$/);
     });
 
     it("should generate deterministic truncated keys for same input", () => {
       const prefix = "test";
       const userKey = "x".repeat(500);
       const limit = 50;
+      const reserve = 0;
 
-      const result1 = makeStorageKey(prefix, userKey, limit);
-      const result2 = makeStorageKey(prefix, userKey, limit);
+      const result1 = makeStorageKey(prefix, userKey, limit, reserve);
+      const result2 = makeStorageKey(prefix, userKey, limit, reserve);
 
       // Same input should produce same truncated key (deterministic)
       expect(result1).toBe(result2);
@@ -249,12 +254,13 @@ describe("Unified Design Tests", () => {
     it("should generate different hashes for different keys", () => {
       const prefix = "test";
       const limit = 50;
+      const reserve = 0;
 
       const key1 = "x".repeat(500);
       const key2 = "y".repeat(500);
 
-      const result1 = makeStorageKey(prefix, key1, limit);
-      const result2 = makeStorageKey(prefix, key2, limit);
+      const result1 = makeStorageKey(prefix, key1, limit, reserve);
+      const result2 = makeStorageKey(prefix, key2, limit, reserve);
 
       // Different keys should produce different hashes (collision resistance)
       expect(result1).not.toBe(result2);
@@ -264,11 +270,14 @@ describe("Unified Design Tests", () => {
       const prefix = "verylongprefixthatexceedsevenlimits";
       const userKey = "key";
       const limit = 20; // Too small even for truncated form
+      const reserve = 0;
 
-      // Should throw when prefix + separator + hash exceeds limit
-      expect(() => makeStorageKey(prefix, userKey, limit)).toThrow(LockError);
-      expect(() => makeStorageKey(prefix, userKey, limit)).toThrow(
-        "exceeds backend limits",
+      // Should throw when prefix + separator + reserve exceeds limit
+      expect(() => makeStorageKey(prefix, userKey, limit, reserve)).toThrow(
+        LockError,
+      );
+      expect(() => makeStorageKey(prefix, userKey, limit, reserve)).toThrow(
+        "Prefix exceeds backend limit",
       );
     });
 
@@ -276,8 +285,9 @@ describe("Unified Design Tests", () => {
       const prefix = "";
       const userKey = "simple-key";
       const limit = 100;
+      const reserve = 0;
 
-      const result = makeStorageKey(prefix, userKey, limit);
+      const result = makeStorageKey(prefix, userKey, limit, reserve);
       expect(result).toBe("simple-key");
     });
   });
