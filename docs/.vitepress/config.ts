@@ -28,7 +28,14 @@ export default defineConfig({
     ["meta", { property: "og:site_name", content: "SyncGuard" }],
     [
       "meta",
-      { property: "og:url", content: "https://kriasoft.github.io/syncguard/" },
+      { property: "og:url", content: "https://kriasoft.com/syncguard/" },
+    ],
+    [
+      "meta",
+      {
+        property: "og:image",
+        content: "https://kriasoft.com/syncguard/og-image.webp",
+      },
     ],
   ],
   themeConfig: {
@@ -97,15 +104,16 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/kriasoft/syncguard" },
+      { icon: "x", link: "https://x.com/kriasoft" },
       { icon: "discord", link: "https://discord.gg/EnbEa7Gsxg" },
+      { icon: "github", link: "https://github.com/kriasoft/syncguard" },
     ],
 
     footer: {
       message:
         'Released under the <a href="https://github.com/kriasoft/syncguard/blob/main/LICENSE">MIT License</a>.',
       copyright:
-        'Copyright © 2025-present <a href="https://kriasoft.com">Kriasoft</a> · Created by <a href="https://github.com/koistya">Konstantin Tarkus</a>',
+        'Copyright © 2025-present <a href="https://kriasoft.com" target="_self">Kriasoft</a> · Created by <a href="https://github.com/koistya">Konstantin Tarkus</a>',
     },
   },
 });

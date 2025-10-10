@@ -4,6 +4,36 @@
 import { LockError } from "../common/backend.js";
 
 /**
+ * Internal error type used to signal non-retryable abort from within Firestore transactions.
+ * When thrown inside a transaction callback, Firestore will not retry the transaction.
+ * This prevents infinite retry loops when AbortSignal is triggered.
+ *
+ * @internal Used only within Firestore operation implementations
+ */
+export class FirestoreAbortError extends Error {
+  readonly __firestoreAbortMarker = true;
+
+  constructor(message: string = "Operation aborted by signal") {
+    super(message);
+    this.name = "FirestoreAbortError";
+  }
+}
+
+/**
+ * Checks if an AbortSignal has been aborted and throws FirestoreAbortError if so.
+ * Use this inside Firestore transaction callbacks to prevent automatic retries.
+ *
+ * @param signal - Optional AbortSignal to check
+ * @throws FirestoreAbortError if signal is aborted (non-retryable by Firestore)
+ * @internal Used by Firestore operation implementations
+ */
+export function checkAbortedForTransaction(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new FirestoreAbortError();
+  }
+}
+
+/**
  * Maps Firestore SDK errors to standardized LockError codes.
  *
  * @param error - Firestore SDK error or string
@@ -11,6 +41,15 @@ import { LockError } from "../common/backend.js";
  * @see specs/interface.md
  */
 export function mapFirestoreError(error: any): LockError {
+  // Handle internal abort error (check multiple properties for maximum robustness)
+  if (
+    error instanceof FirestoreAbortError ||
+    error?.__firestoreAbortMarker === true ||
+    error?.name === "FirestoreAbortError"
+  ) {
+    return new LockError("Aborted", "Operation aborted by signal");
+  }
+
   const errorMessage = error instanceof Error ? error.message : String(error);
 
   // Authentication and authorization errors

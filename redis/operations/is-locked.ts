@@ -44,7 +44,15 @@ export function createIsLockedOperation(
     try {
       const normalizedKey = normalizeAndValidateKey(opts.key);
 
-      const lockKey = makeStorageKey(config.keyPrefix, normalizedKey, 1000);
+      const REDIS_LIMIT_BYTES = 1000;
+      const RESERVE_BYTES = 26; // ":id:" (4 bytes) + 22-char lockId
+
+      const lockKey = makeStorageKey(
+        config.keyPrefix,
+        normalizedKey,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
 
       // Prefer cached command (ioredis) over eval for better performance
       const scriptResult = redis.checkLock

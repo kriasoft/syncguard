@@ -31,7 +31,6 @@ interface RedisWithCommands {
   getLockInfoByLockId?(
     lockIdKey: string,
     lockId: string,
-    keyPrefix: string,
     toleranceMs: string,
   ): Promise<string | null>;
 }
@@ -60,10 +59,18 @@ export function createLookupOperation(
     try {
       let scriptResult: string | null;
 
+      const REDIS_LIMIT_BYTES = 1000;
+      const RESERVE_BYTES = 26; // ":id:" (4 bytes) + 22-char lockId
+
       if ("key" in opts) {
         // Key lookup path: validates and normalizes key
         const normalizedKey = normalizeAndValidateKey(opts.key);
-        const lockKey = makeStorageKey(config.keyPrefix, normalizedKey, 1000);
+        const lockKey = makeStorageKey(
+          config.keyPrefix,
+          normalizedKey,
+          REDIS_LIMIT_BYTES,
+          RESERVE_BYTES,
+        );
 
         // Use Redis function if available, fallback to eval()
         scriptResult = redis.getLockInfoByKey
@@ -80,22 +87,22 @@ export function createLookupOperation(
         const lockIdKey = makeStorageKey(
           config.keyPrefix,
           `id:${opts.lockId}`,
-          1000,
+          REDIS_LIMIT_BYTES,
+          RESERVE_BYTES,
         );
 
-        // Use Redis function if available, fallback to eval()
+        // ADR-013: Use Redis function if available, fallback to eval()
+        // No longer pass keyPrefix - lockKey is retrieved directly from index
         scriptResult = redis.getLockInfoByLockId
           ? await redis.getLockInfoByLockId(
               lockIdKey,
-              config.keyPrefix,
               opts.lockId,
               TIME_TOLERANCE_MS.toString(),
             )
           : ((await redis.eval(
               LOOKUP_BY_LOCKID_SCRIPT,
-              2,
+              1, // Only 1 key now (lockIdKey)
               lockIdKey,
-              config.keyPrefix,
               opts.lockId,
               TIME_TOLERANCE_MS.toString(),
             )) as string | null);
@@ -115,7 +122,7 @@ export function createLookupOperation(
 
       const lockInfo = sanitizeLockInfo(lockData, capabilities);
 
-      // Preserve raw data for debugging (see: common/helpers.ts lookupDebug)
+      // Preserve raw data for debugging (see: getByKeyRaw/getByIdRaw in common/helpers.ts)
       return attachRawData(lockInfo, {
         key: lockData.key,
         lockId: lockData.lockId,

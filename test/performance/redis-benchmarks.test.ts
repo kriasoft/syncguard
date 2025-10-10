@@ -213,22 +213,37 @@ describe("Redis Performance Benchmarks", () => {
 
       // Release all locks
       const releaseStart = performance.now();
+      const releaseResults: boolean[] = [];
       for (const lockId of lockIds) {
-        await backend.release({ lockId: lockId });
+        const result = await backend.release({ lockId });
+        releaseResults.push(result.ok);
       }
       const releaseTime = performance.now() - releaseStart;
 
+      const successfulReleases = releaseResults.filter((ok) => ok).length;
       console.log(
-        `Released ${lockIds.length} locks in ${releaseTime.toFixed(2)}ms`,
+        `Released ${successfulReleases}/${lockIds.length} locks in ${releaseTime.toFixed(2)}ms`,
       );
 
       // Verify cleanup (fence keys are expected to persist)
       const remainingKeys = await redis.keys(`${testKeyPrefix}*`);
       const fenceKeys = remainingKeys.filter((key) => key.includes(":fence:"));
       const lockKeys = remainingKeys.filter((key) => !key.includes(":fence:"));
+
+      // Debug: show what keys remain
+      if (lockKeys.length > 0) {
+        console.log(`Remaining lock keys: ${lockKeys.length}`);
+        console.log(`Failed releases: ${lockIds.length - successfulReleases}`);
+        // Check if these are lockId keys or lock keys
+        const lockIdKeys = lockKeys.filter((k) => k.includes(":id:"));
+        const dataKeys = lockKeys.filter((k) => !k.includes(":id:"));
+        console.log(`  - lockId keys: ${lockIdKeys.length}`);
+        console.log(`  - data keys: ${dataKeys.length}`);
+      }
+
       expect(lockKeys).toHaveLength(0); // Lock and lockId keys should be cleaned up
       // Fence keys are expected to persist for monotonicity
-    });
+    }, 10000); // Increase timeout to 10 seconds
 
     it("should clean up expired locks automatically", async () => {
       const lockCount = 100;

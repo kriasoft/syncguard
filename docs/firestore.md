@@ -2,8 +2,14 @@
 
 Distributed locking using Google Cloud Firestore as the backend. Ideal for applications already using Firestore or requiring serverless infrastructure.
 
+::: danger CRITICAL: Never Delete Fence Counters
+Fence counter documents in the `fence_counters` collection MUST NEVER be deleted. Deleting fence counters breaks monotonicity guarantees and violates fencing safety. Cleanup operations MUST only target lock documents in the `locks` collection, never fence counter documents.
+
+See [Fence Counter Lifecycle](#fence-counter-lifecycle) section for complete details.
+:::
+
 ::: tip Technical Specifications
-For backend implementers: See [specs/firestore.md](https://github.com/kriasoft/syncguard/blob/main/specs/firestore.md) for complete implementation requirements, transaction patterns, and architecture decisions.
+For backend implementers: See [specs/firestore-backend.md](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md) for complete implementation requirements, transaction patterns, and architecture decisions.
 :::
 
 ## Installation
@@ -99,13 +105,15 @@ await lock(workFn, {
 
 ## Time Synchronization
 
-Firestore uses **client time** for expiration checks. Ensure NTP synchronization in production environments.
+Firestore uses **client time** for expiration checks. NTP synchronization is **required** in production environments.
 
 ### Requirements
 
 - **Unified Tolerance**: Fixed 1000ms tolerance (same as Redis) for consistent cross-backend behavior (ADR-005)
-- **NTP Sync**: Keep client clocks within ±500ms accuracy for reliable operation
-- **Monitoring**: Alert on NTP drift exceeding ±250ms
+- **NTP Sync (REQUIRED)**: Keep client clocks within ±500ms accuracy for reliable operation
+- **Deployment Monitoring (REQUIRED)**: Implement NTP sync monitoring in deployment pipeline - fail deployments with >200ms drift
+- **Health Checks (REQUIRED)**: Add application-level health checks that detect and alert on clock skew
+- **Drift Monitoring**: Alert on NTP drift exceeding ±250ms
 - **Non-configurable**: Tolerance is internal and cannot be changed to prevent semantic drift
 
 ### Checking Time Sync
@@ -181,14 +189,31 @@ Firestore guarantees no race conditions within transactions.
 
 ### Fence Counter Lifecycle
 
-Fence counters persist **independently** of lock documents:
+**CRITICAL**: Fence counters are intentionally persistent and MUST NOT be deleted:
+
+```typescript
+// ❌ NEVER do this - breaks monotonicity guarantee and fencing safety
+await db.collection("fence_counters").doc(docId).delete(); // Violates fencing safety
+```
+
+**Why This Is Critical**:
+
+- **Monotonicity guarantee**: Deleting counters breaks the strictly increasing fence token requirement
+- **Cross-backend consistency**: Firestore must match Redis's fence counter persistence behavior
+- **Fencing safety**: Counter reset would allow fence token reuse, violating safety guarantees
+- **Cleanup configuration**: The `cleanupInIsLocked` option MUST NOT affect fence counter documents
+
+**Lifecycle Requirements**:
 
 - Lock documents are deleted on release or expiration
 - Fence counters survive indefinitely (required for fencing safety)
 - Cleanup operations **never** delete fence counters
+- Both collections MUST be separate (enforced via config validation)
+
+**Configuration Safety**: The backend validates that `fenceCollection` differs from `collection` to prevent accidental deletion. Attempting to use the same collection for both will throw `LockError("InvalidArgument")`.
 
 ::: info Dual Document Pattern
-See [specs/firestore.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/specs/firestore.md#fencing-token-implementation-pattern) for the complete dual-document pattern specification and atomic transaction requirements.
+See [specs/firestore-backend.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#fencing-token-implementation-pattern) for the complete dual-document pattern specification and atomic transaction requirements.
 :::
 
 ## Common Patterns
@@ -245,6 +270,30 @@ export async function dailyReport(req: Request, res: Response) {
   );
 
   res.status(200).send({ executed: acquired });
+}
+```
+
+### Monitoring Lock Status
+
+```ts
+import { getByKey, getById, owns } from "syncguard";
+
+// Check if a resource is currently locked
+const info = await getByKey(backend, "resource:123");
+if (info) {
+  console.log(`Resource locked until ${new Date(info.expiresAtMs)}`);
+  console.log(`Fence token: ${info.fence}`);
+}
+
+// Quick ownership check
+if (await owns(backend, lockId)) {
+  console.log("Still own the lock");
+}
+
+// Detailed ownership info
+const owned = await getById(backend, lockId);
+if (owned) {
+  console.log(`Expires in ${owned.expiresAtMs - Date.now()}ms`);
 }
 ```
 

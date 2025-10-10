@@ -14,6 +14,7 @@ export class LockError extends Error {
       | "RateLimited" // Backend rate limit exceeded
       | "NetworkTimeout" // Backend operation exceeded timeout
       | "AcquisitionTimeout" // lock() retry loop exceeded timeoutMs
+      | "Aborted" // Operation cancelled via AbortSignal
       | "Internal", // Unexpected backend errors or quota limits
     message?: string,
     /** Debugging context: lock key, ID, and underlying error */

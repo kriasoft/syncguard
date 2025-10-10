@@ -21,61 +21,64 @@ See `specs/interface.md` for complete API examples,usage patterns, LockBackend i
 
 ```text
 Core:
-  index.ts              → Public API exports for custom backends
+  index.ts               → Public API exports for custom backends
   common/
-    backend.ts          → Main entry point re-exporting from focused modules
-    index.ts            → Re-exports from common module
-    types.ts            → Core interfaces, types & capabilities
-    constants.ts        → Configuration constants & defaults
-    errors.ts           → LockError class & error handling
-    validation.ts       → Key & lockId validation helpers
-    crypto.ts           → Cryptographic functions (lockId generation, hashing)
-    helpers.ts          → Utility functions (getByKey, owns, sanitizeLockInfo)
-    auto-lock.ts        → Auto-managed lock functionality (createAutoLock, lock)
-    config.ts           → Configuration merge helpers
-    telemetry.ts        → Observability & telemetry decorators
+    backend.ts           → Main entry point re-exporting from focused modules
+    index.ts             → Re-exports from common module
+    types.ts             → Core interfaces, types & capabilities
+    constants.ts         → Configuration constants & defaults
+    errors.ts            → LockError class & error handling
+    validation.ts        → Key & lockId validation helpers
+    crypto.ts            → Cryptographic functions (lockId generation, hashing)
+    helpers.ts           → Utility functions (getByKey, owns, sanitizeLockInfo)
+    auto-lock.ts         → Auto-managed lock functionality (createAutoLock, lock)
+    config.ts            → Configuration merge helpers
+    telemetry.ts         → Observability & telemetry decorators
+    backend-semantics.ts → Result mapping & mutation semantics (internal)
+    time-predicates.ts   → Unified time handling & liveness predicates
 
 Backends:
   firestore/
-    backend.ts          → Firestore LockBackend implementation
-    index.ts            → Convenience wrapper with Firestore client setup
-    config.ts           → Firestore-specific configuration & validation
-    types.ts            → Firestore document schemas (LockDocument, etc.)
-    errors.ts           → Centralized Firestore error mapping
+    backend.ts           → Firestore LockBackend implementation
+    index.ts             → Convenience wrapper with Firestore client setup
+    config.ts            → Firestore-specific configuration & validation
+    types.ts             → Firestore document schemas (LockDocument, etc.)
+    errors.ts            → Centralized Firestore error mapping
     operations/
-      acquire.ts        → Atomic acquire operation
-      release.ts        → Atomic release operation
-      extend.ts         → Atomic extend operation
-      is-locked.ts      → Lock status check operation
-      lookup.ts         → Lock lookup by key/lockId (renamed from get-lock-info.ts)
-      index.ts          → Operation exports
+      acquire.ts         → Atomic acquire operation
+      release.ts         → Atomic release operation
+      extend.ts          → Atomic extend operation
+      is-locked.ts       → Lock status check operation
+      lookup.ts          → Lock lookup by key/lockId (renamed from get-lock-info.ts)
+      index.ts           → Operation exports
   redis/
-    backend.ts          → Redis LockBackend implementation using Lua scripts
-    index.ts            → Convenience wrapper with Redis client setup
-    scripts.ts          → Centralized Lua scripts for optimal caching
-    config.ts           → Redis-specific configuration & validation
-    types.ts            → Redis data structures (LockData, etc.)
-    errors.ts           → Centralized Redis error mapping
+    backend.ts           → Redis LockBackend implementation using Lua scripts
+    index.ts             → Convenience wrapper with Redis client setup
+    scripts.ts           → Centralized Lua scripts for optimal caching
+    config.ts            → Redis-specific configuration & validation
+    types.ts             → Redis data structures (LockData, etc.)
+    errors.ts            → Centralized Redis error mapping
     operations/
-      acquire.ts        → Atomic acquire operation
-      release.ts        → Atomic release operation
-      extend.ts         → Atomic extend operation
-      is-locked.ts      → Lock status check operation
-      lookup.ts         → Lock lookup by key/lockId (renamed from get-lock-info.ts)
-      index.ts          → Operation exports
+      acquire.ts         → Atomic acquire operation
+      release.ts         → Atomic release operation
+      extend.ts          → Atomic extend operation
+      is-locked.ts       → Lock status check operation
+      lookup.ts          → Lock lookup by key/lockId (renamed from get-lock-info.ts)
+      index.ts           → Operation exports
 
 Documentation:
   specs/
-    interface.md        → LockBackend API contracts & usage examples
-    firestore.md        → Firestore backend implementation requirements
-    redis.md            → Redis backend implementation requirements
-    adrs.md             → Architectural decision records
-  docs/                 → Documentation site (https://kriasoft.com/syncguard/)
+    README.md            → Spec navigation & reading order
+    interface.md         → LockBackend API contracts & usage examples
+    redis-backend.md     → Redis backend implementation requirements
+    firestore-backend.md → Firestore backend implementation requirements
+    adrs.md              → Architectural decision records
+  docs/                  → Documentation site (https://kriasoft.com/syncguard/)
 ```
 
 ## Implementation Requirements
 
-**Backend-specific requirements**: See `specs/interface.md`, `specs/firestore.md` and `specs/redis.md`
+**Backend-specific requirements**: See `specs/interface.md`, `specs/redis-backend.md` and `specs/firestore-backend.md`
 
 ### Key Design Principles
 

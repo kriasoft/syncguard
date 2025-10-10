@@ -319,10 +319,10 @@ describe("Redis Integration Tests", () => {
           expect(typeof parsedData.expiresAtMs).toBe("number");
           expect(typeof parsedData.acquiredAtMs).toBe("number");
 
-          // Check lockId index
+          // Check lockId index (ADR-013: stores full storage key, not user key)
           const lockIdKey = `${testKeyPrefix}id:${result.lockId}`;
           const indexData = await redis.get(lockIdKey);
-          expect(indexData).toBe("integration:data:verification"); // Index stores user key, not full storage key
+          expect(indexData).toBe(lockKey); // ADR-013: Index stores full lockKey to handle truncation
 
           // Clean up
           await backend.release({ lockId: result.lockId });

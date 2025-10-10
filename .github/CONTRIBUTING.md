@@ -150,12 +150,12 @@ If contributing a new backend, ensure:
 
 - [ ] Implements full `LockBackend` interface (specs/interface.md)
 - [ ] Uses `isLive()` from `common/time-predicates.ts` (no custom time logic)
-- [ ] Uses `makeStorageKey()` for key truncation (ADR-006)
-- [ ] Uses `formatFence()` for 19-digit zero-padded fence tokens (ADR-004-R2)
+- [ ] Uses `makeStorageKey()` for key generation with two-step fence pattern (specs/interface.md#fence-key-derivation, ADR-006)
+- [ ] Uses `formatFence()` for 15-digit zero-padded fence tokens (ADR-004)
 - [ ] Implements TOCTOU protection for release/extend (ADR-003)
 - [ ] Explicit ownership verification after reverse mapping
 - [ ] Comprehensive unit and integration tests
-- [ ] Backend-specific spec document (follow specs/redis.md or specs/firestore.md pattern)
+- [ ] Backend-specific spec document (follow specs/redis-backend.md or specs/firestore-backend.md pattern)
 
 ## Getting Help
 

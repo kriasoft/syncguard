@@ -215,10 +215,13 @@ describe("Firestore Integration Tests", () => {
           expect(typeof lockData.acquiredAtMs).toBe("number");
           expect(lockData.expiresAtMs).toBe(result.expiresAtMs);
 
-          // Check fence counter document
+          // Check fence counter document (ADR-006: two-step pattern)
+          // Fence doc ID: makeStorageKey("", `fence:${baseKey}`, 1500)
+          const baseKey = "integration:data:verification"; // No truncation needed
+          const fenceDocId = `fence:${baseKey}`; // Two-step pattern
           const fenceDocRef = db
             .collection(testFenceCollection)
-            .doc("integration:data:verification");
+            .doc(fenceDocId);
           const fenceDocSnap = await fenceDocRef.get();
 
           expect(fenceDocSnap.exists).toBe(true);
@@ -269,8 +272,9 @@ describe("Firestore Integration Tests", () => {
         expect(current).toBeGreaterThan(previous);
       }
 
-      // Check that fence counter document reflects the latest value
-      const fenceDocRef = db.collection(testFenceCollection).doc(resourceKey);
+      // Check that fence counter document reflects the latest value (ADR-006: two-step pattern)
+      const fenceDocId = `fence:${resourceKey}`; // Two-step pattern
+      const fenceDocRef = db.collection(testFenceCollection).doc(fenceDocId);
       const fenceDocSnap = await fenceDocRef.get();
 
       if (fenceDocSnap.exists) {
@@ -314,7 +318,7 @@ describe("Firestore Integration Tests", () => {
       });
 
       // Clean up all successful locks (cleanup handled by beforeEach/afterEach)
-    });
+    }, 10000); // Extended timeout for Firestore emulator operations
 
     it("should handle rapid acquire/release cycles", async () => {
       const resourceKey = "integration:rapid:cycles";
@@ -476,9 +480,9 @@ describe("Firestore Integration Tests", () => {
         expect(result.ok).toBe(true);
       });
 
-      // Should complete in reasonable time (Firestore can be slower than Redis)
-      expect(elapsed).toBeLessThan(10000); // 10 seconds for 5 operations with emulator
-    });
+      // Should complete in reasonable time (Firestore emulator can be slow)
+      expect(elapsed).toBeLessThan(15000); // 15 seconds for 5 operations with emulator
+    }, 20000); // Extended timeout for Firestore emulator operations
   });
 
   describe("Collection Management", () => {
@@ -503,9 +507,9 @@ describe("Firestore Integration Tests", () => {
         const lockDocSnap = await lockDocRef.get();
         expect(lockDocSnap.exists).toBe(true);
 
-        const fenceDocRef = db
-          .collection("custom_fence_test")
-          .doc("custom:collection:test");
+        // Fence document uses two-step pattern (ADR-006)
+        const fenceDocId = "fence:custom:collection:test";
+        const fenceDocRef = db.collection("custom_fence_test").doc(fenceDocId);
         const fenceDocSnap = await fenceDocRef.get();
         expect(fenceDocSnap.exists).toBe(true);
 

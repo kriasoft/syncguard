@@ -7,13 +7,13 @@ import {
   mapToMutationResult,
 } from "../../common/backend-semantics.js";
 import {
-  type LockOp,
-  type ReleaseResult,
   LockError,
   validateLockId,
+  type LockOp,
+  type ReleaseResult,
 } from "../../common/backend.js";
 import { isLive, TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapFirestoreError } from "../errors.js";
+import { checkAbortedForTransaction, mapFirestoreError } from "../errors.js";
 import type { FirestoreConfig, LockDocument } from "../types.js";
 
 /**
@@ -30,10 +30,16 @@ export function createReleaseOperation(
       validateLockId(opts.lockId);
 
       const result = await db.runTransaction(async (trx) => {
+        // Check for cancellation at start of transaction
+        checkAbortedForTransaction(opts.signal);
+
         // Query lockId index for O(1) lookup
         const querySnapshot = await trx.get(
           locksCollection.where("lockId", "==", opts.lockId).limit(1),
         );
+
+        // Check for cancellation after read
+        checkAbortedForTransaction(opts.signal);
 
         const doc = querySnapshot.docs[0];
         const data = doc?.data() as LockDocument | undefined;
@@ -54,6 +60,8 @@ export function createReleaseOperation(
         });
 
         if (condition === "succeeded") {
+          // Check for cancellation before write
+          checkAbortedForTransaction(opts.signal);
           await trx.delete(doc!.ref);
         }
 

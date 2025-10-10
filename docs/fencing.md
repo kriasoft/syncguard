@@ -15,15 +15,15 @@ const result = await backend.acquire({ key: "document:123", ttlMs: 30000 });
 
 if (result.ok) {
   const { lockId, fence } = result;
-  console.log(fence); // "0000000000000000001"
+  console.log(fence); // "000000000000001"
 }
 ```
 
-Fence tokens are 19-digit zero-padded strings that compare lexicographically (ADR-004-R2):
+Fence tokens are 15-digit zero-padded strings that compare lexicographically (ADR-004):
 
 ```typescript
-const first = "0000000000000000001";
-const second = "0000000000000000002";
+const first = "000000000000001";
+const second = "000000000000002";
 
 console.log(second > first); // true (string comparison works!)
 console.log(first === second); // false
@@ -35,7 +35,7 @@ console.log(first === second); // false
 - **Persistent**: Counters survive backend restarts
 - **Per-key**: Each lock key has its own independent counter
 - **Lexicographic**: Direct string comparison (`>`, `<`, `===`) reflects chronological order
-- **No helpers needed**: Fixed 19-digit format enables direct comparison without utility functions
+- **No helpers needed**: Fixed 15-digit format enables direct comparison without utility functions
 
 ## The Stale Lock Problem
 
@@ -114,7 +114,7 @@ if (result.ok) {
   await db.runTransaction(async (trx) => {
     const docRef = db.collection("documents").doc("123");
     const doc = await trx.get(docRef);
-    const currentFence = doc.data()?.fence || "0000000000000000000";
+    const currentFence = doc.data()?.fence || "000000000000000";
 
     // Reject stale writes atomically
     if (fence <= currentFence) {
@@ -269,24 +269,20 @@ try {
 Fences are lexicographically ordered strings—direct comparison works:
 
 ```typescript
-const fenceA = "0000000000000000100";
-const fenceB = "0000000000000000200";
+const fenceA = "000000000000100";
+const fenceB = "000000000000200";
 
 // String comparison reflects chronological order
 console.log(fenceB > fenceA); // true
 console.log(fenceA === fenceB); // false
 
 // Sort fences chronologically
-const fences = [
-  "0000000000000000003",
-  "0000000000000000001",
-  "0000000000000000002",
-];
+const fences = ["000000000000003", "000000000000001", "000000000000002"];
 const sorted = fences.sort(); // ["001", "002", "003"]
 ```
 
-::: tip Why Zero-Padded Strings? (ADR-004-R2)
-19-digit zero-padding ensures lexicographic order matches numeric order. Without padding, `"2" > "10"` (lexicographic), but we need `"0000000000000000002" < "0000000000000000010"` (correct). The fixed-width format eliminates the need for comparison helper functions—direct string comparison just works.
+::: tip Why Zero-Padded Strings? (ADR-004)
+15-digit zero-padding ensures lexicographic order matches numeric order. Without padding, `"2" > "10"` (lexicographic), but we need `"000000000000002" < "000000000000010"` (correct). The fixed-width format eliminates the need for comparison helper functions—direct string comparison just works.
 :::
 
 ## When to Use Fencing
@@ -341,29 +337,64 @@ if (result.ok) {
 
 ## Fence Token Format
 
-SyncGuard uses **19-digit zero-padded decimal strings** across all backends:
+SyncGuard uses **15-digit zero-padded decimal strings** across all backends:
 
 ```typescript
-"0000000000000000001"; // First lock
-"0000000000000000002"; // Second lock
-"0000000000000009999"; // 9,999th lock
+"000000000000001"; // First lock
+"000000000000002"; // Second lock
+"000000000009999"; // 9,999th lock
 ```
 
-**Why 19 digits?**
+**Why 15 digits?**
 
-- Accommodates Redis's signed 64-bit INCR limit (`2^63-1 ≈ 9.2e18`)
+- Guarantees full safety within Lua's 53-bit precision limit (2^53-1 ≈ 9.007e15)
+- Eliminates ALL risk of floating-point rounding errors in Redis
 - Consistent format across Redis and Firestore
 - Lexicographic comparison works correctly
 - JSON-safe (no precision loss from BigInt serialization)
 
 **Practical limits**:
 
-- **9e18 fence tokens** per key before overflow
-- At **1 million locks/day**, takes **24 billion years** to overflow
-- Backends log warnings when approaching theoretical limits
+- **Overflow protection**: `FENCE_THRESHOLDS.MAX = "900000000000000"` (9×10¹⁴ operations per key)
+- **Warning threshold**: `FENCE_THRESHOLDS.WARN = "090000000000000"` (9×10¹³ operations per key)
+- At **1 million locks/day**, takes **~2,466 years** to reach the overflow limit
+- Backends automatically enforce these limits (ADR-004)
 
 ::: info Counter Lifecycle
 Fence counters are **persistent** and survive backend restarts. They accumulate over the lifetime of the backend instance. For most applications (bounded key spaces), memory impact is negligible (~50-100 bytes per unique key).
+:::
+
+## Overflow Protection
+
+SyncGuard enforces strict overflow limits to prevent fence counter wraparound:
+
+**Automatic Protection** (ADR-004):
+
+- **Hard limit**: Operations fail with `LockError("Internal")` when fence exceeds `FENCE_THRESHOLDS.MAX`
+- **Early warning**: Logs warnings when fence exceeds `FENCE_THRESHOLDS.WARN` (10% before limit)
+- **Cross-backend consistency**: Both Redis and Firestore enforce identical limits using canonical constants from `common/constants.ts`
+
+**When overflow occurs**:
+
+```typescript
+try {
+  const result = await backend.acquire({ key, ttlMs: 30000 });
+} catch (error) {
+  if (error instanceof LockError && error.code === "Internal") {
+    // Fence counter has reached operational limit (FENCE_THRESHOLDS.MAX)
+    // Action: Rotate to a new key namespace or contact operations
+  }
+}
+```
+
+**Operational Response**:
+
+1. **Monitor warnings**: Watch for log messages about approaching limits
+2. **Key rotation**: If a key approaches the limit, migrate to a new key namespace
+3. **Production planning**: At 1M locks/day, you have ~2,466 years before overflow
+
+::: warning Overflow Recovery
+If overflow occurs, you must rotate to a new key namespace. Resetting fence counters breaks monotonicity guarantees and can cause data corruption. Never reset production fence counters.
 :::
 
 ## Troubleshooting
@@ -375,7 +406,7 @@ You can't reset counters safely in production—monotonicity is the security gua
 - **Redis**: `DEL syncguard:fence:resource:123`
 - **Firestore**: Delete the document in the `fence_counters` collection
 
-Never reset production counters.
+Never reset production counters. Use key rotation instead.
 
 **Q: What happens if two backends use the same key?**
 
@@ -384,3 +415,7 @@ Each backend maintains independent counters. Don't mix backends for the same key
 **Q: Do I need to clean up old fences?**
 
 No. Counters are per-key and accumulate slowly. Deleting fence counters breaks monotonicity and can cause data corruption.
+
+**Q: What if I see overflow warnings in production?**
+
+Warnings appear when fence counters exceed `FENCE_THRESHOLDS.WARN` (9×10¹³). This is extremely rare—it means the key has been locked ~90 trillion times. Contact operations to plan key namespace rotation before reaching the hard limit at `FENCE_THRESHOLDS.MAX` (9×10¹⁴).

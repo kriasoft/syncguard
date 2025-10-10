@@ -22,7 +22,6 @@ interface RedisWithCommands {
   ): Promise<unknown>;
   releaseLock?(
     lockIdKey: string,
-    keyPrefix: string,
     lockId: string,
     toleranceMs: string,
   ): Promise<number>;
@@ -40,27 +39,30 @@ export function createReleaseOperation(
     try {
       validateLockId(opts.lockId);
 
+      const REDIS_LIMIT_BYTES = 1000;
+      const RESERVE_BYTES = 26; // ":id:" (4 bytes) + 22-char lockId
+
       const lockIdKey = makeStorageKey(
         config.keyPrefix,
         `id:${opts.lockId}`,
-        1000,
+        REDIS_LIMIT_BYTES,
+        RESERVE_BYTES,
       );
 
       const toleranceMs = TIME_TOLERANCE_MS;
 
-      // Use cached script (releaseLock) if available, otherwise eval directly
+      // ADR-013: Use cached script (releaseLock) if available, otherwise eval directly
+      // No longer pass keyPrefix - lockKey is retrieved directly from index
       const scriptResult = redis.releaseLock
         ? await redis.releaseLock(
             lockIdKey,
-            config.keyPrefix,
             opts.lockId,
             toleranceMs.toString(),
           )
         : ((await redis.eval(
             RELEASE_SCRIPT,
-            2,
+            1, // Only 1 key now (lockIdKey)
             lockIdKey,
-            config.keyPrefix,
             opts.lockId,
             toleranceMs.toString(),
           )) as number);

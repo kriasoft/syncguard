@@ -5,11 +5,15 @@
  * Atomic lock acquisition with fencing tokens.
  * Flow: check expiration → generate fence token → set both keys with TTL
  *
- * @returns {1, fence} on success, 0 on contention
- * @see specs/redis.md for acquire operation spec
+ * @returns {1, fence, expiresAtMs} on success, 0 on contention
+ * @see specs/redis-backend.md for acquire operation spec
  *
  * KEYS: [lockKey, lockIdKey, fenceKey]
- * ARGV: [lockId, ttlMs, toleranceMs, key]
+ * ARGV: [lockId, ttlMs, toleranceMs, storageKey, userKey]
+ *
+ * ADR-013: storageKey is the full computed lockKey (post-truncation), stored in
+ * the index to ensure release/extend can retrieve the exact key without reconstruction.
+ * userKey is the original normalized key, stored in lockData for lookup operations.
  */
 export const ACQUIRE_SCRIPT = `
 local lockKey = KEYS[1]
@@ -18,7 +22,8 @@ local fenceKey = KEYS[3]
 local lockId = ARGV[1]
 local ttlMs = tonumber(ARGV[2])
 local toleranceMs = tonumber(ARGV[3])
-local key = ARGV[4]
+local storageKey = ARGV[4]
+local userKey = ARGV[5]
 
 -- Canonical time: Redis TIME converted to milliseconds
 local time = redis.call('TIME')
@@ -34,14 +39,15 @@ if existingData then
   end
 end
 -- INCR guarantees monotonic fencing tokens
-local fenceNumber = redis.call('INCR', fenceKey)
-local fence = string.format("%019d", fenceNumber)  -- Zero-padded for lexicographic ordering
+-- Format immediately as 15-digit string for guaranteed Lua precision safety (2^53-1)
+local fence = string.format("%015d", redis.call('INCR', fenceKey))
 -- Atomic dual-key write with identical TTL
 local expiresAtMs = nowMs + ttlMs
-local lockData = cjson.encode({lockId=lockId, expiresAtMs=expiresAtMs, acquiredAtMs=nowMs, key=key, fence=fence})
+local lockData = cjson.encode({lockId=lockId, expiresAtMs=expiresAtMs, acquiredAtMs=nowMs, key=userKey, fence=fence})
 redis.call('SET', lockKey, lockData, 'PX', ttlMs)
-redis.call('SET', lockIdKey, key, 'PX', ttlMs)  -- Reverse lookup index
-return {1, fence}
+-- ADR-013: Store full lockKey in index (not original user key) to handle truncation
+redis.call('SET', lockIdKey, storageKey, 'PX', ttlMs)
+return {1, fence, expiresAtMs}
 `;
 
 /**
@@ -51,29 +57,22 @@ return {1, fence}
  * @returns 1=success, 0=ownership mismatch, -1=not found, -2=expired
  * @see specs/adrs.md ADR-003 for ownership verification requirement
  *
- * KEYS: [lockIdKey, keyPrefix]
+ * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs]
+ *
+ * ADR-013: Retrieve full lockKey directly from index (no reconstruction needed).
  */
 export const RELEASE_SCRIPT = `
 local lockIdKey = KEYS[1]
-local keyPrefix = KEYS[2]
 local lockId = ARGV[1]
 local toleranceMs = tonumber(ARGV[2])
 
 local time = redis.call('TIME')
 local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
 
--- Reverse lookup: lockId → key
-local key = redis.call('GET', lockIdKey)
-if not key then return -1 end
-
--- Handle prefix with/without trailing colon
-local lockKey
-if string.sub(keyPrefix, -1) == ":" then
-  lockKey = keyPrefix .. key
-else
-  lockKey = keyPrefix .. ":" .. key
-end
+-- ADR-013: Reverse lookup returns full lockKey (post-truncation)
+local lockKey = redis.call('GET', lockIdKey)
+if not lockKey then return -1 end
 
 local lockData = redis.call('GET', lockKey)
 if not lockData then return -1 end
@@ -98,15 +97,16 @@ return 1
  * Atomic lock extension with ownership verification.
  * Flow: reverse lookup → verify ownership → replace TTL entirely
  *
- * @returns 1=success, 0=ownership mismatch/not found/expired
+ * @returns {1, newExpiresAtMs} on success, 0 on ownership mismatch/not found/expired
  * @see specs/adrs.md ADR-003 for ownership verification requirement
  *
- * KEYS: [lockIdKey, keyPrefix]
+ * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs, ttlMs]
+ *
+ * ADR-013: Retrieve full lockKey directly from index (no reconstruction needed).
  */
 export const EXTEND_SCRIPT = `
 local lockIdKey = KEYS[1]
-local keyPrefix = KEYS[2]
 local lockId = ARGV[1]
 local toleranceMs = tonumber(ARGV[2])
 local ttlMs = tonumber(ARGV[3])
@@ -114,15 +114,9 @@ local ttlMs = tonumber(ARGV[3])
 local time = redis.call('TIME')
 local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
 
-local key = redis.call('GET', lockIdKey)
-if not key then return 0 end
-
-local lockKey
-if string.sub(keyPrefix, -1) == ":" then
-  lockKey = keyPrefix .. key
-else
-  lockKey = keyPrefix .. ":" .. key
-end
+-- ADR-013: Reverse lookup returns full lockKey (post-truncation)
+local lockKey = redis.call('GET', lockIdKey)
+if not lockKey then return 0 end
 
 local lockData = redis.call('GET', lockKey)
 if not lockData then return 0 end
@@ -142,8 +136,8 @@ if data.lockId ~= lockId then return 0 end
 local newExpiresAtMs = nowMs + ttlMs
 data.expiresAtMs = newExpiresAtMs
 redis.call('SET', lockKey, cjson.encode(data), 'PX', ttlMs)
-redis.call('SET', lockIdKey, key, 'PX', ttlMs)
-return 1
+redis.call('SET', lockIdKey, lockKey, 'PX', ttlMs)  -- Re-store full lockKey
+return {1, newExpiresAtMs}
 `;
 
 /**
@@ -151,7 +145,7 @@ return 1
  * Cleanup uses 2s safety buffer to prevent extend() race conditions.
  *
  * @returns 1 if locked and live, 0 otherwise
- * @see specs/redis.md for isLocked operation spec
+ * @see specs/redis-backend.md for isLocked operation spec
  *
  * KEYS: [lockKey]
  * ARGV: [keyPrefix, toleranceMs, enableCleanup ("true"|"false")]
@@ -224,33 +218,35 @@ return cjson.encode(data)
 `;
 
 /**
- * Lookup lock by lockId using reverse mapping.
+ * Lookup lock by lockId using atomic reverse mapping (Redis multi-key reads).
  * Verifies ownership before returning lock info.
+ *
+ * NOTE: This atomic implementation prevents TOCTOU races during multi-key reads.
+ * Per ADR-011, atomicity is required for Redis (multi-key pattern) but optional
+ * for Firestore (indexed queries). Lookup is DIAGNOSTIC ONLY—correctness relies
+ * on atomic release/extend operations, NOT lookup results.
  *
  * @returns lock info (JSON) if live and owned, nil otherwise
  * @see specs/interface.md for lookup operation spec
+ * @see specs/adrs.md ADR-011 for atomicity rationale
  *
- * KEYS: [lockIdKey, keyPrefix]
+ * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs]
+ *
+ * ADR-013: Retrieve full lockKey directly from index (no reconstruction needed).
  */
 export const LOOKUP_BY_LOCKID_SCRIPT = `
 local lockIdKey = KEYS[1]
-local keyPrefix = KEYS[2]
 local lockId = ARGV[1]
 local toleranceMs = tonumber(ARGV[2])
 
 local time = redis.call('TIME')
 local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
 
-local key = redis.call('GET', lockIdKey)
-if not key then return nil end
+-- ADR-013: Reverse lookup returns full lockKey (post-truncation)
+local lockKey = redis.call('GET', lockIdKey)
+if not lockKey then return nil end
 
-local lockKey
-if string.sub(keyPrefix, -1) == ":" then
-  lockKey = keyPrefix .. key
-else
-  lockKey = keyPrefix .. ":" .. key
-end
 local lockData = redis.call('GET', lockKey)
 if not lockData then return nil end
 
