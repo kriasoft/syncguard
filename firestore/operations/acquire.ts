@@ -4,10 +4,13 @@
 import type { CollectionReference, Firestore } from "@google-cloud/firestore";
 import {
   type AcquireResult,
+  checkAborted,
+  FENCE_THRESHOLDS,
   formatFence,
   generateLockId,
   type KeyOp,
   LockError,
+  logFenceWarning,
   makeStorageKey,
   normalizeAndValidateKey,
 } from "../../common/backend.js";
@@ -45,17 +48,42 @@ export function createAcquireOperation(
 
       const lockId = generateLockId();
       const normalizedKey = normalizeAndValidateKey(opts.key);
+
       // Firestore document ID limit: 1500 bytes
-      const storageKey = makeStorageKey("", normalizedKey, 1500);
-      const lockDoc = locksCollection.doc(storageKey);
-      const fenceCounterDoc = fenceCounterCollection.doc(storageKey);
+      // No reserve needed - each doc ID is independent (no derived suffixes like Redis)
+      const FIRESTORE_LIMIT_BYTES = 1500;
+      const RESERVE_BYTES = 0;
+
+      // ADR-006: Two-step fence key generation for consistent hash mapping
+      const baseKey = makeStorageKey(
+        "",
+        normalizedKey,
+        FIRESTORE_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
+      const fenceDocId = makeStorageKey(
+        "",
+        `fence:${baseKey}`,
+        FIRESTORE_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
+      const lockDoc = locksCollection.doc(baseKey);
+      const fenceCounterDoc = fenceCounterCollection.doc(fenceDocId);
 
       // Transaction ensures atomic read-increment-write of fence counter with lock
       const result = await db.runTransaction(async (trx) => {
+        // Check for cancellation before starting transaction work
+        checkAborted(opts.signal);
+
         // Firestore requirement: all reads before writes
         const currentLockDoc = await trx.get(lockDoc);
         const currentCounterDoc = await trx.get(fenceCounterDoc);
 
+        // Check for cancellation after reads
+        checkAborted(opts.signal);
+
+        // MUST capture nowMs inside transaction for authoritative client-time (ADR-010)
+        // This ensures expiresAtMs is computed from the same time source used for liveness checks
         const nowMs = Date.now();
 
         // Contention check: reject if unexpired lock exists
@@ -68,28 +96,30 @@ export function createAcquireOperation(
 
         // BigInt fence counter: prevents precision loss at high values
         const currentFenceStr =
-          currentCounterDoc.data()?.fence || "0000000000000000000";
+          currentCounterDoc.data()?.fence || "000000000000000";
         const currentFence = BigInt(currentFenceStr);
         const nextFence = currentFence + BigInt(1);
 
-        // Operational monitoring: warn at 90% of max safe integer
-        const warningThreshold = BigInt("9000000000000000000");
-        if (nextFence > warningThreshold) {
-          console.warn(
-            `[SyncGuard] Fence counter approaching limit for key: ${opts.key}`,
+        // Overflow enforcement (ADR-004): throw at FENCE_THRESHOLDS.MAX
+        const overflowLimit = BigInt(FENCE_THRESHOLDS.MAX);
+        if (nextFence > overflowLimit) {
+          throw new LockError(
+            "Internal",
+            `Fence counter overflow - exceeded operational limit (${FENCE_THRESHOLDS.MAX})`,
+            { key: opts.key },
           );
         }
 
-        // Max safe integer for Firestore number type
-        const maxValue = BigInt("9223372036854775807");
-        if (nextFence > maxValue) {
-          throw new LockError(
-            "Internal",
-            "Fence counter limit exceeded - contact operations to rotate key namespace",
-          );
+        // Operational monitoring: warn at FENCE_THRESHOLDS.WARN using shared utility
+        const warningThreshold = BigInt(FENCE_THRESHOLDS.WARN);
+        if (nextFence > warningThreshold) {
+          logFenceWarning(nextFence.toString(), opts.key);
         }
 
         const nextFenceStr = formatFence(nextFence);
+
+        // Compute expiresAtMs from authoritative time captured inside transaction
+        // NEVER pre-compute outside transaction to ensure time authority consistency
         const expiresAtMs = nowMs + opts.ttlMs;
 
         // Atomic write: update fence counter and create lock document
@@ -105,6 +135,9 @@ export function createAcquireOperation(
           key: opts.key,
           fence: nextFenceStr,
         };
+
+        // Check for cancellation before writes
+        checkAborted(opts.signal);
 
         await trx.set(fenceCounterDoc, counterDocument);
         await trx.set(lockDoc, lockDocument);

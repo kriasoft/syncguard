@@ -3,6 +3,7 @@
 
 import type { CollectionReference, Firestore } from "@google-cloud/firestore";
 import {
+  checkAborted,
   type KeyOp,
   LockError,
   makeStorageKey,
@@ -24,10 +25,25 @@ export function createIsLockedOperation(
 ) {
   return async (opts: KeyOp): Promise<boolean> => {
     try {
+      // Check for cancellation before starting operation
+      checkAborted(opts.signal);
+
       const normalizedKey = normalizeAndValidateKey(opts.key);
-      const storageKey = makeStorageKey("", normalizedKey, 1500); // Firestore 1500-byte document ID limit
+
+      const FIRESTORE_LIMIT_BYTES = 1500;
+      const RESERVE_BYTES = 0; // No derived keys in Firestore
+
+      const storageKey = makeStorageKey(
+        "",
+        normalizedKey,
+        FIRESTORE_LIMIT_BYTES,
+        RESERVE_BYTES,
+      );
       const docRef = locksCollection.doc(storageKey);
       const doc = await docRef.get();
+
+      // Check for cancellation after read
+      checkAborted(opts.signal);
 
       if (!doc.exists) {
         return false;

@@ -127,15 +127,13 @@ export async function lock<T, C extends BackendCapabilities>(
 
     // AbortSignal support for cancellation
     if (config.signal?.aborted) {
-      throw new LockError(
-        "NetworkTimeout",
-        "Operation cancelled by user signal",
-        { key: normalizedKey },
-      );
+      throw new LockError("Aborted", "Operation cancelled by user signal", {
+        key: normalizedKey,
+      });
     }
     if (acquisitionOpts.signal?.aborted) {
       throw new LockError(
-        "NetworkTimeout",
+        "Aborted",
         "Acquisition cancelled by acquisition signal",
         { key: normalizedKey },
       );

@@ -7,6 +7,7 @@ import {
   mapToMutationResult,
 } from "../../common/backend-semantics.js";
 import {
+  checkAborted,
   type LockOp,
   type ReleaseResult,
   LockError,
@@ -30,10 +31,16 @@ export function createReleaseOperation(
       validateLockId(opts.lockId);
 
       const result = await db.runTransaction(async (trx) => {
+        // Check for cancellation before starting transaction work
+        checkAborted(opts.signal);
+
         // Query lockId index for O(1) lookup
         const querySnapshot = await trx.get(
           locksCollection.where("lockId", "==", opts.lockId).limit(1),
         );
+
+        // Check for cancellation after read
+        checkAborted(opts.signal);
 
         const doc = querySnapshot.docs[0];
         const data = doc?.data() as LockDocument | undefined;
@@ -54,6 +61,8 @@ export function createReleaseOperation(
         });
 
         if (condition === "succeeded") {
+          // Check for cancellation before write
+          checkAborted(opts.signal);
           await trx.delete(doc!.ref);
         }
 

@@ -36,8 +36,10 @@ export type {
 
 export {
   BACKEND_DEFAULTS,
+  BACKEND_LIMITS,
   LOCK_DEFAULTS,
   MAX_KEY_LENGTH_BYTES,
+  RESERVE_BYTES,
 } from "./common/constants.js";
 
 // Core Functions and Classes
@@ -61,7 +63,6 @@ export {
   getByKey,
   getByKeyRaw,
   hasFence,
-  lookupDebug,
   owns,
   sanitizeLockInfo,
 } from "./common/helpers.js";

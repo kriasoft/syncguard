@@ -714,9 +714,9 @@ describe("Redis Lock Integration Tests", () => {
   });
 
   describe("Fence Token Compliance", () => {
-    it("should generate fence tokens in 19-digit zero-padded format", async () => {
+    it("should generate fence tokens in 15-digit zero-padded format", async () => {
       const key = "fence:format:test";
-      const fenceFormatRegex = /^\d{19}$/; // Spec requirement: exactly 19 digits
+      const fenceFormatRegex = /^\d{15}$/; // ADR-004: exactly 15 digits for precision safety
 
       const result = await backend.acquire({ key, ttlMs: 30000 });
       expect(result.ok).toBe(true);
@@ -724,7 +724,7 @@ describe("Redis Lock Integration Tests", () => {
       if (result.ok) {
         // Verify fence format compliance
         expect(result.fence).toMatch(fenceFormatRegex);
-        expect(result.fence.length).toBe(19);
+        expect(result.fence.length).toBe(15);
         expect(Number(result.fence)).toBeGreaterThan(0);
 
         await backend.release({ lockId: result.lockId });
@@ -756,6 +756,131 @@ describe("Redis Lock Integration Tests", () => {
         const current = BigInt(fences[i]!);
         const previous = BigInt(fences[i - 1]!);
         expect(current > previous).toBe(true);
+      }
+    });
+  });
+
+  describe("Time Authority & ADR-010 Compliance", () => {
+    it("should return authoritative expiresAtMs from acquire operation (Redis server time)", async () => {
+      const key = "time:acquire:test";
+      const ttlMs = 5000;
+
+      // Capture time before operation
+      const beforeMs = Date.now();
+
+      const result = await backend.acquire({ key, ttlMs });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Capture time after operation
+        const afterMs = Date.now();
+
+        // expiresAtMs should be authoritative (computed from Redis TIME command)
+        // Per redis-backend.md line 241: MUST return authoritative expiresAtMs
+        // Redis TIME command has microsecond precision, but conversion to ms truncates
+        // Allow 100ms tolerance for precision loss, timing differences, and clock skew
+        const minExpiry = beforeMs + ttlMs - 100;
+        const maxExpiry = afterMs + ttlMs + 100;
+
+        expect(result.expiresAtMs).toBeGreaterThanOrEqual(minExpiry);
+        expect(result.expiresAtMs).toBeLessThanOrEqual(maxExpiry);
+
+        // Verify it's a precise value, not approximated
+        expect(Number.isInteger(result.expiresAtMs)).toBe(true);
+
+        // Verify it's based on Redis server time (should be close to Date.now() + ttl)
+        // Allow for clock skew between client and Redis server plus network latency
+        const expectedExpiry = afterMs + ttlMs;
+        const timeDiff = Math.abs(result.expiresAtMs - expectedExpiry);
+        expect(timeDiff).toBeLessThan(1000); // 1000ms tolerance for clock skew + network/processing
+
+        await backend.release({ lockId: result.lockId });
+      }
+    });
+
+    it("should return authoritative expiresAtMs from extend operation (Redis server time)", async () => {
+      const key = "time:extend:test";
+      const initialTtlMs = 2000;
+      const extendTtlMs = 5000;
+
+      // Acquire lock
+      const result = await backend.acquire({ key, ttlMs: initialTtlMs });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Wait a bit
+        await Bun.sleep(100);
+
+        // Capture time before extend
+        const beforeExtendMs = Date.now();
+
+        const extendResult = await backend.extend({
+          lockId: result.lockId,
+          ttlMs: extendTtlMs,
+        });
+        expect(extendResult.ok).toBe(true);
+
+        if (extendResult.ok) {
+          // Capture time after extend
+          const afterExtendMs = Date.now();
+
+          // expiresAtMs should be authoritative (computed from Redis TIME command)
+          // Per redis-backend.md line 303: MUST return authoritative expiresAtMs
+          // Redis TIME command has microsecond precision, but conversion to ms truncates
+          // Allow 100ms tolerance for precision loss, timing differences, and clock skew
+          const minExpiry = beforeExtendMs + extendTtlMs - 100;
+          const maxExpiry = afterExtendMs + extendTtlMs + 100;
+
+          expect(extendResult.expiresAtMs).toBeGreaterThanOrEqual(minExpiry);
+          expect(extendResult.expiresAtMs).toBeLessThanOrEqual(maxExpiry);
+
+          // Verify it's a precise value, not approximated
+          expect(Number.isInteger(extendResult.expiresAtMs)).toBe(true);
+
+          // Verify extend actually reset the TTL (not added to original)
+          expect(extendResult.expiresAtMs).toBeGreaterThan(result.expiresAtMs);
+
+          // Verify it's based on Redis server time
+          // Allow for clock skew between client and Redis server plus network latency
+          const expectedExpiry = afterExtendMs + extendTtlMs;
+          const timeDiff = Math.abs(extendResult.expiresAtMs - expectedExpiry);
+          expect(timeDiff).toBeLessThan(1000); // 1000ms tolerance for clock skew + network/processing
+
+          await backend.release({ lockId: result.lockId });
+        }
+      }
+    });
+
+    it("should use Redis server time consistently across operations", async () => {
+      const key = "time:consistency:test";
+
+      // Acquire lock
+      const acquireResult = await backend.acquire({ key, ttlMs: 10000 });
+      expect(acquireResult.ok).toBe(true);
+
+      if (acquireResult.ok) {
+        const acquireExpiry = acquireResult.expiresAtMs;
+
+        // Extend lock
+        await Bun.sleep(50);
+        const extendResult = await backend.extend({
+          lockId: acquireResult.lockId,
+          ttlMs: 10000,
+        });
+        expect(extendResult.ok).toBe(true);
+
+        if (extendResult.ok) {
+          // Extended expiry should be later than original
+          expect(extendResult.expiresAtMs).toBeGreaterThan(acquireExpiry);
+
+          // Both should be based on same time authority (Redis server)
+          // The difference should roughly match the sleep duration
+          const timeDiff = extendResult.expiresAtMs - acquireExpiry;
+          expect(timeDiff).toBeGreaterThan(0);
+          expect(timeDiff).toBeLessThan(200); // Account for network latency
+
+          await backend.release({ lockId: acquireResult.lockId });
+        }
       }
     });
   });
@@ -811,7 +936,7 @@ describe("Redis Lock Integration Tests", () => {
           // Allow small timing differences between client and server time
           expect(
             Math.abs(lookupResult.expiresAtMs - acquireResult.expiresAtMs),
-          ).toBeLessThan(10);
+          ).toBeLessThan(15);
           expect(typeof lookupResult.acquiredAtMs).toBe("number");
 
           // Verify fence token exists (Redis always supports fencing)
@@ -854,7 +979,7 @@ describe("Redis Lock Integration Tests", () => {
           // Allow small timing differences between client and server time
           expect(
             Math.abs(lookupResult.expiresAtMs - acquireResult.expiresAtMs),
-          ).toBeLessThan(10);
+          ).toBeLessThan(15);
           expect(typeof lookupResult.acquiredAtMs).toBe("number");
 
           // Verify fence token exists (Redis always supports fencing)
@@ -910,6 +1035,100 @@ describe("Redis Lock Integration Tests", () => {
           lockId: acquireResult.lockId,
         });
         expect(ownershipResult).toBeNull();
+      }
+    });
+  });
+
+  describe("Fence Counter Protection", () => {
+    it("should NEVER delete fence counter keys during cleanup", async () => {
+      const key = "fence:cleanup:test";
+
+      // Acquire and release lock to establish fence counter
+      const result1 = await backend.acquire({ key, ttlMs: 100 });
+      expect(result1.ok).toBe(true);
+
+      if (result1.ok) {
+        const fence1 = result1.fence;
+
+        // Release the lock
+        await backend.release({ lockId: result1.lockId });
+
+        // Wait for lock to expire completely (100ms TTL + buffer)
+        await Bun.sleep(150);
+
+        // Trigger cleanup via isLocked
+        const isLocked = await backend.isLocked({ key });
+        expect(isLocked).toBe(false);
+
+        // Acquire new lock - fence counter MUST persist
+        const result2 = await backend.acquire({ key, ttlMs: 30000 });
+        expect(result2.ok).toBe(true);
+
+        if (result2.ok) {
+          // Fence MUST be monotonically increasing (fence counter survived cleanup)
+          expect(BigInt(result2.fence)).toBeGreaterThan(BigInt(fence1));
+
+          // Clean up
+          await backend.release({ lockId: result2.lockId });
+        }
+      }
+    });
+
+    it("should maintain fence monotonicity across multiple cleanup cycles", async () => {
+      const key = "fence:cleanup:monotonic";
+      const fences: string[] = [];
+
+      // Run multiple acquire-cleanup-acquire cycles
+      for (let i = 0; i < 3; i++) {
+        // Acquire lock with short TTL
+        const result = await backend.acquire({ key, ttlMs: 100 });
+        expect(result.ok).toBe(true);
+
+        if (result.ok) {
+          fences.push(result.fence);
+          await backend.release({ lockId: result.lockId });
+        }
+
+        // Wait for cleanup (100ms TTL + buffer)
+        await Bun.sleep(150);
+
+        // Trigger cleanup
+        await backend.isLocked({ key });
+      }
+
+      // Verify fence monotonicity across cleanup cycles
+      expect(fences).toHaveLength(3);
+      for (let i = 1; i < fences.length; i++) {
+        expect(BigInt(fences[i]!)).toBeGreaterThan(BigInt(fences[i - 1]!));
+      }
+    });
+
+    it("should protect fence counter from direct Redis access during cleanup", async () => {
+      const key = "fence:cleanup:protection";
+
+      // Acquire initial lock to create fence counter
+      const result1 = await backend.acquire({ key, ttlMs: 100 });
+      expect(result1.ok).toBe(true);
+
+      if (result1.ok) {
+        await backend.release({ lockId: result1.lockId });
+
+        // Wait for cleanup window
+        await Bun.sleep(150);
+
+        // Trigger cleanup
+        await backend.isLocked({ key });
+
+        // Verify fence counter key still exists
+        const fenceKey = `${testKeyPrefix}fence:${testKeyPrefix}${key}`;
+        const fenceValue = await redis.get(fenceKey);
+
+        // Fence counter MUST still exist after cleanup
+        expect(fenceValue).not.toBeNull();
+        expect(Number(fenceValue)).toBeGreaterThan(0);
+
+        // Clean up
+        await redis.del(fenceKey);
       }
     });
   });

@@ -31,21 +31,20 @@ interface RedisWithCommands extends Redis {
     lockId: string,
     ttlMs: string,
     toleranceMs: string,
-    key: string,
-  ): Promise<[number, string] | number>;
+    storageKey: string, // ADR-013: Full lockKey (post-truncation) for index storage
+    userKey: string, // Original normalized key for lockData
+  ): Promise<[number, string, number] | number>;
   releaseLock(
     lockIdKey: string,
-    keyPrefix: string,
     lockId: string,
     toleranceMs: string,
   ): Promise<number>;
   extendLock(
     lockIdKey: string,
-    keyPrefix: string,
     lockId: string,
     toleranceMs: string,
     ttlMs: string,
-  ): Promise<number>;
+  ): Promise<[number, number] | number>;
   checkLock(
     lockKey: string,
     keyPrefix: string,
@@ -55,7 +54,6 @@ interface RedisWithCommands extends Redis {
   lookupByKey(lockKey: string, toleranceMs: string): Promise<string | null>;
   lookupByLockId(
     lockIdKey: string,
-    keyPrefix: string,
     lockId: string,
     toleranceMs: string,
   ): Promise<string | null>;
@@ -69,7 +67,7 @@ interface RedisWithCommands extends Redis {
  * @param redis - ioredis client instance
  * @param options - Backend configuration (keyPrefix, ttl, tolerance)
  * @returns LockBackend with server-side time authority
- * @see specs/redis.md
+ * @see specs/redis-backend.md
  */
 export function createRedisBackend(
   redis: Redis,
@@ -85,12 +83,12 @@ export function createRedisBackend(
     });
 
     redis.defineCommand("releaseLock", {
-      numberOfKeys: 2,
+      numberOfKeys: 1, // ADR-013: Only lockIdKey (no keyPrefix)
       lua: RELEASE_SCRIPT,
     });
 
     redis.defineCommand("extendLock", {
-      numberOfKeys: 2,
+      numberOfKeys: 1, // ADR-013: Only lockIdKey (no keyPrefix)
       lua: EXTEND_SCRIPT,
     });
 
@@ -105,7 +103,7 @@ export function createRedisBackend(
     });
 
     redis.defineCommand("lookupByLockId", {
-      numberOfKeys: 2,
+      numberOfKeys: 1, // ADR-013: Only lockIdKey (no keyPrefix)
       lua: LOOKUP_BY_LOCKID_SCRIPT,
     });
   }

@@ -258,27 +258,22 @@ describe("Firestore Lock Integration Tests", () => {
       );
       expect(lockStatuses).toEqual([true, true, true]);
 
-      // Release all locks
-      const releaseResults = await Promise.all(
-        results.map((result, index) => {
-          if (result.ok) {
-            return backend.release({ lockId: result.lockId });
-          }
-          return { ok: false as const, reason: "failed" as const };
-        }),
-      );
-
-      // All releases should succeed
-      releaseResults.forEach((result) => {
-        expect(result.ok).toBe(true);
-      });
+      // Release all locks sequentially to avoid Firestore transaction conflicts
+      for (const result of results) {
+        if (result.ok) {
+          const releaseResult = await backend.release({
+            lockId: result.lockId,
+          });
+          expect(releaseResult.ok).toBe(true);
+        }
+      }
 
       // Verify all resources are unlocked
       const finalStatuses = await Promise.all(
         resources.map((key) => backend.isLocked({ key })),
       );
       expect(finalStatuses).toEqual([false, false, false]);
-    });
+    }, 10000); // Extended timeout for Firestore operations
   });
 
   describe("Ownership Verification (ADR-003)", () => {
@@ -355,17 +350,17 @@ describe("Firestore Lock Integration Tests", () => {
   });
 
   describe("Fencing Token Functionality", () => {
-    it("should generate fence tokens in 19-digit zero-padded format", async () => {
+    it("should generate fence tokens in 15-digit zero-padded format", async () => {
       const key = "fence:format:test";
-      const fenceFormatRegex = /^\d{19}$/; // Spec requirement: exactly 19 digits
+      const fenceFormatRegex = /^\d{15}$/; // ADR-004: exactly 15 digits for precision safety
 
       const result = await backend.acquire({ key, ttlMs: 30000 });
       expect(result.ok).toBe(true);
 
       if (result.ok) {
-        // Verify fence format compliance per spec lines 1178-1185
+        // Verify fence format compliance per ADR-004
         expect(result.fence).toMatch(fenceFormatRegex);
-        expect(result.fence.length).toBe(19);
+        expect(result.fence.length).toBe(15);
         expect(BigInt(result.fence)).toBeGreaterThan(0n);
 
         await backend.release({ lockId: result.lockId });
@@ -484,7 +479,7 @@ describe("Firestore Lock Integration Tests", () => {
         expect(sharedCounter).toBe(1);
         expect(incrementResults).toEqual([1]);
       }
-    });
+    }, 10000); // Extended timeout for Firestore emulator operations
 
     it("should allow concurrent access to different resources", async () => {
       const startTime = Date.now();
@@ -515,7 +510,7 @@ describe("Firestore Lock Integration Tests", () => {
 
       // Should complete reasonably fast for parallel execution (Firestore emulator can be slow)
       expect(elapsed).toBeLessThan(5000); // More generous timeout for Firestore
-    });
+    }, 10000); // Extended timeout for Firestore emulator operations
 
     it("should respect acquisition timeout and fail gracefully", async () => {
       const resourceKey = "resource:timeout-test";
@@ -572,7 +567,7 @@ describe("Firestore Lock Integration Tests", () => {
         }
         expect(isExpectedFailure).toBe(true);
       }
-    });
+    }, 10000); // Extended timeout for Firestore emulator operations
   });
 
   describe("Lock Expiration", () => {
@@ -790,29 +785,26 @@ describe("Firestore Lock Integration Tests", () => {
       const errors: Error[] = [];
 
       // Create concurrent lock operations
-      const promises = Array.from(
-        { length: numOperations },
-        async (_, index) => {
-          try {
-            await lock(
-              async () => {
-                successfulOperations++;
-                await Bun.sleep(10); // Brief critical section
+      const promises = Array.from({ length: numOperations }, async () => {
+        try {
+          await lock(
+            async () => {
+              successfulOperations++;
+              await Bun.sleep(10); // Brief critical section
+            },
+            {
+              key: resourceKey,
+              acquisition: {
+                retryDelayMs: 50,
+                maxRetries: 20,
+                timeoutMs: 8000, // Increased timeout for Firestore emulator
               },
-              {
-                key: resourceKey,
-                acquisition: {
-                  retryDelayMs: 50,
-                  maxRetries: 20,
-                  timeoutMs: 5000, // Increased timeout for Firestore
-                },
-              },
-            );
-          } catch (error) {
-            errors.push(error as Error);
-          }
-        },
-      );
+            },
+          );
+        } catch (error) {
+          errors.push(error as Error);
+        }
+      });
 
       await Promise.all(promises);
 
@@ -832,7 +824,7 @@ describe("Firestore Lock Integration Tests", () => {
       // Verify no dangling locks remain (with some delay for cleanup)
       await Bun.sleep(100);
       expect(await backend.isLocked({ key: resourceKey })).toBe(false);
-    });
+    }, 15000); // Extended timeout for Firestore emulator operations
 
     it("should handle rapid acquire/release cycles", async () => {
       const key = "resource:rapid";
@@ -857,8 +849,84 @@ describe("Firestore Lock Integration Tests", () => {
     });
   });
 
+  describe("Time Authority & ADR-010", () => {
+    it("should return authoritative expiresAtMs from acquire operation", async () => {
+      const key = "time:acquire:test";
+      const ttlMs = 5000;
+
+      // Capture time before operation
+      const beforeMs = Date.now();
+
+      const result = await backend.acquire({ key, ttlMs });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Capture time after operation
+        const afterMs = Date.now();
+
+        // expiresAtMs should be authoritative (computed inside transaction)
+        // It should be within reasonable bounds: beforeMs + ttlMs <= expiresAtMs <= afterMs + ttlMs
+        const minExpiry = beforeMs + ttlMs;
+        const maxExpiry = afterMs + ttlMs;
+
+        expect(result.expiresAtMs).toBeGreaterThanOrEqual(minExpiry);
+        expect(result.expiresAtMs).toBeLessThanOrEqual(maxExpiry);
+
+        // Verify it's a precise value, not approximated
+        expect(Number.isInteger(result.expiresAtMs)).toBe(true);
+
+        await backend.release({ lockId: result.lockId });
+      }
+    });
+
+    it("should return authoritative expiresAtMs from extend operation", async () => {
+      const key = "time:extend:test";
+      const initialTtlMs = 2000;
+      const extendTtlMs = 5000;
+
+      // Acquire lock
+      const result = await backend.acquire({ key, ttlMs: initialTtlMs });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Wait a bit
+        await Bun.sleep(100);
+
+        // Capture time before extend
+        const beforeExtendMs = Date.now();
+
+        const extendResult = await backend.extend({
+          lockId: result.lockId,
+          ttlMs: extendTtlMs,
+        });
+        expect(extendResult.ok).toBe(true);
+
+        if (extendResult.ok) {
+          // Capture time after extend
+          const afterExtendMs = Date.now();
+
+          // expiresAtMs should be authoritative (computed inside transaction)
+          // It should be within reasonable bounds: beforeExtendMs + extendTtlMs <= expiresAtMs <= afterExtendMs + extendTtlMs
+          const minExpiry = beforeExtendMs + extendTtlMs;
+          const maxExpiry = afterExtendMs + extendTtlMs;
+
+          expect(extendResult.expiresAtMs).toBeGreaterThanOrEqual(minExpiry);
+          expect(extendResult.expiresAtMs).toBeLessThanOrEqual(maxExpiry);
+
+          // Verify it's a precise value, not approximated
+          expect(Number.isInteger(extendResult.expiresAtMs)).toBe(true);
+
+          // Verify extend actually reset the TTL (not added to original)
+          expect(extendResult.expiresAtMs).toBeGreaterThan(result.expiresAtMs);
+
+          await backend.release({ lockId: result.lockId });
+        }
+      }
+    });
+  });
+
   describe("Cleanup Behavior", () => {
-    it("should clean up expired locks during isLocked check", async () => {
+    it("should clean up expired locks during isLocked check when enabled", async () => {
       const key = "resource:cleanup";
 
       // Create a lock with very short TTL
@@ -883,5 +951,178 @@ describe("Firestore Lock Integration Tests", () => {
         }
       }
     }, 10000); // Extended timeout for sleep + Firestore operations
+
+    it("should NOT clean up expired locks when cleanupInIsLocked is false (default)", async () => {
+      // Create backend with cleanup disabled (default behavior)
+      const noCleanupBackend = createFirestoreBackend(db, {
+        collection: testCollection,
+        fenceCollection: testFenceCollection,
+        cleanupInIsLocked: false, // Explicitly disabled
+      });
+
+      const key = "resource:no-cleanup";
+
+      // Acquire lock with short TTL
+      const result = await noCleanupBackend.acquire({ key, ttlMs: 200 });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Wait for it to expire beyond tolerance + safety guard
+        await Bun.sleep(2300);
+
+        // isLocked should return false (lock is expired)
+        const isLocked = await noCleanupBackend.isLocked({ key });
+        expect(isLocked).toBe(false);
+
+        // Wait for any fire-and-forget cleanup transaction to complete (shouldn't happen with cleanupInIsLocked: false)
+        await Bun.sleep(200);
+
+        // Verify lock document still exists in Firestore (not cleaned up)
+        const lockDoc = await db.collection(testCollection).doc(key).get();
+        expect(lockDoc.exists).toBe(true);
+
+        // Manual cleanup
+        await lockDoc.ref.delete();
+      }
+    }, 10000);
+
+    it("should default to cleanup disabled when cleanupInIsLocked is omitted", async () => {
+      // Create backend without specifying cleanupInIsLocked (should default to false)
+      const defaultBackend = createFirestoreBackend(db, {
+        collection: testCollection,
+        fenceCollection: testFenceCollection,
+        // cleanupInIsLocked omitted - should default to false
+      });
+
+      const key = "resource:default-cleanup";
+
+      // Acquire lock with short TTL
+      const result = await defaultBackend.acquire({ key, ttlMs: 200 });
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        // Wait for it to expire
+        await Bun.sleep(2300);
+
+        // isLocked should return false (lock is expired)
+        const isLocked = await defaultBackend.isLocked({ key });
+        expect(isLocked).toBe(false);
+
+        // Wait for any fire-and-forget cleanup transaction to complete (shouldn't happen with default cleanupInIsLocked: false)
+        await Bun.sleep(200);
+
+        // Verify lock document still exists (cleanup is disabled by default)
+        const lockDoc = await db.collection(testCollection).doc(key).get();
+        expect(lockDoc.exists).toBe(true);
+
+        // Manual cleanup
+        await lockDoc.ref.delete();
+      }
+    }, 10000);
+  });
+
+  describe("Fence Counter Protection", () => {
+    it("should NEVER delete fence counter documents during cleanup", async () => {
+      const key = "fence:cleanup:test";
+
+      // Acquire and release lock to establish fence counter
+      const result1 = await backend.acquire({ key, ttlMs: 200 });
+      expect(result1.ok).toBe(true);
+
+      if (result1.ok) {
+        const fence1 = result1.fence;
+
+        // Release the lock
+        await backend.release({ lockId: result1.lockId });
+
+        // Wait for lock to expire completely + safety guard (200ms TTL + 1000ms tolerance + 1000ms guard = 2200ms minimum)
+        await Bun.sleep(2300);
+
+        // Trigger cleanup via isLocked
+        const isLocked = await backend.isLocked({ key });
+        expect(isLocked).toBe(false);
+
+        // Wait for fire-and-forget cleanup transaction to complete
+        await Bun.sleep(200);
+
+        // Acquire new lock - fence counter MUST persist
+        const result2 = await backend.acquire({ key, ttlMs: 30000 });
+        expect(result2.ok).toBe(true);
+
+        if (result2.ok) {
+          // Fence MUST be monotonically increasing (fence counter survived cleanup)
+          expect(BigInt(result2.fence)).toBeGreaterThan(BigInt(fence1));
+
+          // Clean up
+          await backend.release({ lockId: result2.lockId });
+        }
+      }
+    }, 10000);
+
+    it("should maintain fence monotonicity across multiple cleanup cycles", async () => {
+      const key = "fence:cleanup:monotonic";
+      const fences: string[] = [];
+
+      // Run multiple acquire-cleanup-acquire cycles
+      for (let i = 0; i < 3; i++) {
+        // Acquire lock with short TTL
+        const result = await backend.acquire({ key, ttlMs: 200 });
+        expect(result.ok).toBe(true);
+
+        if (result.ok) {
+          fences.push(result.fence);
+          await backend.release({ lockId: result.lockId });
+        }
+
+        // Wait for cleanup (200ms TTL + 1000ms tolerance + 1000ms guard = 2200ms minimum)
+        await Bun.sleep(2300);
+
+        // Trigger cleanup
+        await backend.isLocked({ key });
+
+        // Wait for fire-and-forget cleanup transaction to complete
+        await Bun.sleep(200);
+      }
+
+      // Verify fence monotonicity across cleanup cycles
+      expect(fences).toHaveLength(3);
+      for (let i = 1; i < fences.length; i++) {
+        expect(BigInt(fences[i]!)).toBeGreaterThan(BigInt(fences[i - 1]!));
+      }
+    }, 15000);
+
+    it("should protect fence counter from direct database access during cleanup", async () => {
+      const key = "fence:cleanup:protection";
+
+      // Acquire initial lock to create fence counter
+      const result1 = await backend.acquire({ key, ttlMs: 200 });
+      expect(result1.ok).toBe(true);
+
+      if (result1.ok) {
+        await backend.release({ lockId: result1.lockId });
+
+        // Wait for cleanup window
+        await Bun.sleep(2300);
+
+        // Trigger cleanup
+        await backend.isLocked({ key });
+
+        // Wait for fire-and-forget cleanup transaction to complete
+        await Bun.sleep(200);
+
+        // Verify fence counter document still exists
+        const fenceDocId = `fence:${key}`;
+        const fenceDoc = await db
+          .collection(testFenceCollection)
+          .doc(fenceDocId)
+          .get();
+
+        // Fence counter MUST still exist after cleanup
+        expect(fenceDoc.exists).toBe(true);
+
+        // Clean up
+        await fenceDoc.ref.delete();
+      }
+    }, 10000);
   });
 });
