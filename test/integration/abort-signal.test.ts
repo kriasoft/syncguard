@@ -151,74 +151,86 @@ describe("AbortSignal support", () => {
       }
     });
 
-    test("release respects AbortSignal", async () => {
-      const controller = new AbortController();
-      const key = `abort-test-${Date.now()}`;
+    // Note: Firestore emulator can be slow to release locks (up to 30s per docs)
+    // Use extended timeout to accommodate emulator's lock release behavior
+    test(
+      "release respects AbortSignal",
+      async () => {
+        const controller = new AbortController();
+        const key = `abort-test-${Date.now()}`;
 
-      // Acquire a lock first
-      const result = await firestoreBackend.acquire({ key, ttlMs: 1000 });
-      expect(result.ok).toBe(true);
+        // Acquire a lock first
+        const result = await firestoreBackend.acquire({ key, ttlMs: 1000 });
+        expect(result.ok).toBe(true);
 
-      if (!result.ok) return;
+        if (!result.ok) return;
 
-      // Abort before release
-      controller.abort();
+        // Abort before release
+        controller.abort();
 
-      try {
-        await firestoreBackend.release({
-          lockId: result.lockId,
-          signal: controller.signal,
-        });
-        throw new Error("Should have thrown LockError");
-      } catch (error) {
-        expect(error).toBeInstanceOf(LockError);
-        if (error instanceof LockError) {
-          expect(error.code).toBe("Aborted");
+        try {
+          await firestoreBackend.release({
+            lockId: result.lockId,
+            signal: controller.signal,
+          });
+          throw new Error("Should have thrown LockError");
+        } catch (error) {
+          expect(error).toBeInstanceOf(LockError);
+          if (error instanceof LockError) {
+            expect(error.code).toBe("Aborted");
+          }
         }
-      }
 
-      // Cleanup: release without signal (wrap in try-catch in case lock was partially cleaned)
-      try {
-        await firestoreBackend.release({ lockId: result.lockId });
-      } catch {
-        // Lock may have expired or been cleaned up - this is acceptable
-      }
-    });
-
-    test("extend respects AbortSignal", async () => {
-      const controller = new AbortController();
-      const key = `abort-test-${Date.now()}`;
-
-      // Acquire a lock first
-      const result = await firestoreBackend.acquire({ key, ttlMs: 1000 });
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) return;
-
-      // Abort before extend
-      controller.abort();
-
-      try {
-        await firestoreBackend.extend({
-          lockId: result.lockId,
-          ttlMs: 2000,
-          signal: controller.signal,
-        });
-        throw new Error("Should have thrown LockError");
-      } catch (error) {
-        expect(error).toBeInstanceOf(LockError);
-        if (error instanceof LockError) {
-          expect(error.code).toBe("Aborted");
+        // Cleanup: release without signal (wrap in try-catch in case lock was partially cleaned)
+        try {
+          await firestoreBackend.release({ lockId: result.lockId });
+        } catch {
+          // Lock may have expired or been cleaned up - this is acceptable
         }
-      }
+      },
+      { timeout: 10000 },
+    );
 
-      // Cleanup: release without signal (wrap in try-catch in case lock was partially cleaned)
-      try {
-        await firestoreBackend.release({ lockId: result.lockId });
-      } catch {
-        // Lock may have expired or been cleaned up - this is acceptable
-      }
-    });
+    // Note: Firestore emulator can be slow to release locks (up to 30s per docs)
+    // Use extended timeout to accommodate emulator's lock release behavior
+    test(
+      "extend respects AbortSignal",
+      async () => {
+        const controller = new AbortController();
+        const key = `abort-test-${Date.now()}`;
+
+        // Acquire a lock first
+        const result = await firestoreBackend.acquire({ key, ttlMs: 1000 });
+        expect(result.ok).toBe(true);
+
+        if (!result.ok) return;
+
+        // Abort before extend
+        controller.abort();
+
+        try {
+          await firestoreBackend.extend({
+            lockId: result.lockId,
+            ttlMs: 2000,
+            signal: controller.signal,
+          });
+          throw new Error("Should have thrown LockError");
+        } catch (error) {
+          expect(error).toBeInstanceOf(LockError);
+          if (error instanceof LockError) {
+            expect(error.code).toBe("Aborted");
+          }
+        }
+
+        // Cleanup: release without signal (wrap in try-catch in case lock was partially cleaned)
+        try {
+          await firestoreBackend.release({ lockId: result.lockId });
+        } catch {
+          // Lock may have expired or been cleaned up - this is acceptable
+        }
+      },
+      { timeout: 10000 },
+    );
 
     test("isLocked respects AbortSignal", async () => {
       const controller = new AbortController();
