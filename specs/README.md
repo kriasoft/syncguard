@@ -9,6 +9,7 @@ For best understanding, read specifications in this order:
 1. **[interface.md](./interface.md)** — Core LockBackend contract, types, and common requirements
 2. Backend-specific deltas (extend core contract with implementation details):
    - **[redis-backend.md](./redis-backend.md)** — Redis implementation with Lua scripts
+   - **[postgres-backend.md](./postgres-backend.md)** — PostgreSQL implementation with transactions
    - **[firestore-backend.md](./firestore-backend.md)** — Firestore implementation with transactions
 3. **[adrs.md](./adrs.md)** — Architecture decisions (optional, historical context)
 
@@ -20,6 +21,7 @@ For best understanding, read specifications in this order:
 | Required diagnostic API | `interface.md` → Lookup Operation                |
 | Error handling          | `interface.md` → Error Handling Standards        |
 | Redis patterns          | `redis-backend.md` → Lua scripts, key schema     |
+| PostgreSQL patterns     | `postgres-backend.md` → Transactions, tables     |
 | Firestore patterns      | `firestore-backend.md` → Transactions, documents |
 | Architectural decisions | `adrs.md`                                        |
 
@@ -103,7 +105,7 @@ See [adrs.md](./adrs.md) for the complete ADR template, writing guidelines, and 
 
 ## Backend Delta Pattern
 
-Backend specs (`redis-backend.md`, `firestore-backend.md`) extend the core interface specification (`interface.md`) with implementation-specific details. To enhance machine-parseability and prevent agent drift (per ADR-012), backend specs:
+Backend specs (`redis-backend.md`, `postgres-backend.md`, `firestore-backend.md`) extend the core interface specification (`interface.md`) with implementation-specific details. To enhance machine-parseability and prevent agent drift (per ADR-012), backend specs:
 
 **MUST restate** key inherited requirements as explicit MUST/SHOULD bullets in their operation requirement sections, with cross-references to the rationale in `interface.md` and ADRs (e.g., "see ADR-010 for rationale").
 

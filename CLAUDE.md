@@ -1,6 +1,6 @@
 # SyncGuard - Distributed Lock Library
 
-TypeScript library for preventing race conditions across microservices using Firestore or Redis backends.
+TypeScript library for preventing race conditions across microservices using Redis, PostgreSQL, or Firestore backends.
 
 ## Commands
 
@@ -15,70 +15,35 @@ bun run dev        # Watch mode
 
 ### Core API Design
 
-See `specs/interface.md` for complete API examples,usage patterns, LockBackend interface specification, and type definitions.
+See `specs/interface.md` for complete API examples, usage patterns, LockBackend interface specification, and type definitions.
 
-### File Structure
+### Project Structure
 
 ```text
 Core:
   index.ts               → Public API exports for custom backends
-  common/
-    backend.ts           → Main entry point re-exporting from focused modules
-    index.ts             → Re-exports from common module
-    types.ts             → Core interfaces, types & capabilities
-    constants.ts         → Configuration constants & defaults
-    errors.ts            → LockError class & error handling
-    validation.ts        → Key & lockId validation helpers
-    crypto.ts            → Cryptographic functions (lockId generation, hashing)
-    helpers.ts           → Utility functions (getByKey, owns, sanitizeLockInfo)
-    auto-lock.ts         → Auto-managed lock functionality (createAutoLock, lock)
-    config.ts            → Configuration merge helpers
-    telemetry.ts         → Observability & telemetry decorators
-    backend-semantics.ts → Result mapping & mutation semantics (internal)
-    time-predicates.ts   → Unified time handling & liveness predicates
+  common/                → Shared utilities, types, and core functionality
+    (See common/README.md for detailed structure)
 
 Backends:
-  firestore/
-    backend.ts           → Firestore LockBackend implementation
-    index.ts             → Convenience wrapper with Firestore client setup
-    config.ts            → Firestore-specific configuration & validation
-    types.ts             → Firestore document schemas (LockDocument, etc.)
-    errors.ts            → Centralized Firestore error mapping
-    operations/
-      acquire.ts         → Atomic acquire operation
-      release.ts         → Atomic release operation
-      extend.ts          → Atomic extend operation
-      is-locked.ts       → Lock status check operation
-      lookup.ts          → Lock lookup by key/lockId (renamed from get-lock-info.ts)
-      index.ts           → Operation exports
-  redis/
-    backend.ts           → Redis LockBackend implementation using Lua scripts
-    index.ts             → Convenience wrapper with Redis client setup
-    scripts.ts           → Centralized Lua scripts for optimal caching
-    config.ts            → Redis-specific configuration & validation
-    types.ts             → Redis data structures (LockData, etc.)
-    errors.ts            → Centralized Redis error mapping
-    operations/
-      acquire.ts         → Atomic acquire operation
-      release.ts         → Atomic release operation
-      extend.ts          → Atomic extend operation
-      is-locked.ts       → Lock status check operation
-      lookup.ts          → Lock lookup by key/lockId (renamed from get-lock-info.ts)
-      index.ts           → Operation exports
+  redis/                 → Redis backend implementation (see redis/README.md)
+  postgres/              → PostgreSQL backend implementation (see postgres/README.md)
+  firestore/             → Firestore backend implementation (see firestore/README.md)
 
 Documentation:
-  specs/
+  specs/                 → Technical specifications
     README.md            → Spec navigation & reading order
     interface.md         → LockBackend API contracts & usage examples
-    redis-backend.md     → Redis backend implementation requirements
-    firestore-backend.md → Firestore backend implementation requirements
+    redis-backend.md     → Redis backend specification
+    postgres-backend.md  → PostgreSQL backend specification
+    firestore-backend.md → Firestore backend specification
     adrs.md              → Architectural decision records
   docs/                  → Documentation site (https://kriasoft.com/syncguard/)
 ```
 
 ## Implementation Requirements
 
-**Backend-specific requirements**: See `specs/interface.md`, `specs/redis-backend.md` and `specs/firestore-backend.md`
+**Backend-specific requirements**: See `specs/interface.md`, `specs/redis-backend.md`, `specs/postgres-backend.md`, and `specs/firestore-backend.md`
 
 ### Key Design Principles
 
@@ -94,7 +59,7 @@ Documentation:
 ### Module Exports
 
 - Main: `syncguard` → Core types/utilities
-- Submodules: `syncguard/firestore`, `syncguard/redis`, `syncguard/common`
+- Submodules: `syncguard/redis`, `syncguard/postgres`, `syncguard/firestore`, `syncguard/common`
 - All exports use ES modules with TypeScript declarations
 
 ## Testing Approach
@@ -104,13 +69,14 @@ Documentation:
 Assume that:
 
 - Redis server is already running on localhost:6379
+- PostgreSQL server is already running on localhost:5432
 - Firestore emulator is already running on localhost:8080
 
 ### Development workflow
 
 1. **Unit tests**: `bun run test:unit` (fast, mocked dependencies)
 2. **Build/typecheck**: `bun run build && bun run typecheck`
-3. **Integration tests**: `bun run test:integration` (requires Redis)
+3. **Integration tests**: `bun run test:integration` (requires Redis, PostgreSQL, and Firestore emulator)
 4. **Performance validation**: `bun run test:performance` (optional)
 
 ## Code Standards

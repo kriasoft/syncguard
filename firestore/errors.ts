@@ -73,6 +73,18 @@ export function mapFirestoreError(error: any): LockError {
     );
   }
 
+  // Transaction timeout errors (Firestore emulator can cause long transaction retries)
+  if (
+    errorMessage.includes("invalid or closed") ||
+    errorMessage.includes("Transaction is invalid")
+  ) {
+    return new LockError(
+      "NetworkTimeout",
+      `Firestore transaction timeout: ${errorMessage}`,
+      { cause: error },
+    );
+  }
+
   // ABORTED treated as transient - transaction conflicts are retryable
   if (
     errorMessage.includes("UNAVAILABLE") ||

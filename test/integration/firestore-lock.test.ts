@@ -515,10 +515,17 @@ describe("Firestore Lock Integration Tests", () => {
     it("should respect acquisition timeout and fail gracefully", async () => {
       const resourceKey = "resource:timeout-test";
 
-      // First lock holds for longer than second lock's timeout
+      // Note: Firestore emulator has ~450ms latency per transaction on local dev,
+      // but can be much higher (1000ms+) on CI/CD shared runners. Timeouts must
+      // account for variable latency to prevent flaky tests.
+      // Timing: First lock holds for 4000ms. After 1000ms delay, second lock starts
+      // and has 2000ms timeout. Second lock will wait 3000ms (4000-1000) which exceeds
+      // its 2000ms timeout, so it will fail as expected.
+
+      // Start first lock
       const longRunningLock = lock(
         async () => {
-          await Bun.sleep(800); // Hold lock for 800ms
+          await Bun.sleep(4000); // Hold lock for 4 seconds (increased for CI/CD stability)
         },
         {
           key: resourceKey,
@@ -526,10 +533,10 @@ describe("Firestore Lock Integration Tests", () => {
         },
       );
 
-      // Give first lock time to acquire
-      await Bun.sleep(50);
+      // Give first lock time to acquire (needs longer delay for slow CI/CD emulator)
+      await Bun.sleep(1000);
 
-      // Second lock attempts with short timeout
+      // Start second lock AFTER delay - this ensures first lock has acquired
       const shortTimeoutLock = lock(
         async () => {
           throw new Error("This should not execute");
@@ -537,9 +544,9 @@ describe("Firestore Lock Integration Tests", () => {
         {
           key: resourceKey,
           acquisition: {
-            timeoutMs: 300, // Will timeout before first lock releases
-            maxRetries: 50,
-            retryDelayMs: 5,
+            timeoutMs: 2000, // Will timeout before first lock releases (2000ms < 3000ms wait time)
+            maxRetries: 20,
+            retryDelayMs: 100,
           },
         },
       );
@@ -567,7 +574,7 @@ describe("Firestore Lock Integration Tests", () => {
         }
         expect(isExpectedFailure).toBe(true);
       }
-    }, 10000); // Extended timeout for Firestore emulator operations
+    }, 20000); // Extended timeout for CI/CD Firestore emulator latency (4000ms lock + 1000ms delay + 2000ms timeout + overhead)
   });
 
   describe("Lock Expiration", () => {

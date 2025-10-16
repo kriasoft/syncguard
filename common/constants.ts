@@ -17,6 +17,24 @@ export const MAX_KEY_LENGTH_BYTES = 512;
 export const BACKEND_LIMITS = {
   /** Redis key length limit (practical maximum) */
   REDIS: 1000,
+  /**
+   * PostgreSQL TEXT primary key limit based on B-tree index tuple size.
+   *
+   * **Rationale:**
+   * - PostgreSQL B-tree index pages are 8KB by default
+   * - Theoretical max tuple size: ~2704 bytes (1/3 of page size)
+   * - Required headroom for:
+   *   - Tuple header overhead (~23 bytes)
+   *   - Multi-column indexes (e.g., composite primary key or secondary indexes)
+   *   - UTF-8 encoding variations (worst case: 4 bytes per character)
+   * - Conservative limit: 1700 bytes ensures safety with ~1000 bytes margin
+   *
+   * **NOT related to:** PostgreSQL identifier limit (63 bytes for table/column names).
+   * That limit applies to schema object names, not row data.
+   *
+   * @see https://www.postgresql.org/docs/current/btree-implementation.html
+   */
+  POSTGRES: 1700,
   /** Firestore document ID limit */
   FIRESTORE: 1500,
 } as const;
@@ -32,6 +50,10 @@ export const BACKEND_LIMITS = {
  * - lockId = 22 bytes (base64url encoded from 16 random bytes)
  * - Total: 26 bytes
  *
+ * **Calculation for PostgreSQL:**
+ * - No derived keys with suffixes (lock and fence tables use separate primary keys)
+ * - Total: 0 bytes
+ *
  * **Calculation for Firestore:**
  * - No derived keys with suffixes (each key type uses independent document IDs)
  * - Total: 0 bytes
@@ -44,6 +66,14 @@ export const BACKEND_LIMITS = {
  * const indexKey = makeStorageKey(prefix, `id:${lockId}`, BACKEND_LIMITS.REDIS, RESERVE_BYTES.REDIS);
  * ```
  *
+ * @example PostgreSQL independent table design
+ * ```typescript
+ * // Lock table primary key: "user:resource"
+ * // Fence counter table primary key: "fence:user:resource" (independent, not derived)
+ * const baseKey = makeStorageKey("", key, BACKEND_LIMITS.POSTGRES, RESERVE_BYTES.POSTGRES);
+ * const fenceKey = makeStorageKey("", `fence:${baseKey}`, BACKEND_LIMITS.POSTGRES, RESERVE_BYTES.POSTGRES);
+ * ```
+ *
  * @example Firestore independent document IDs
  * ```typescript
  * // Lock document ID: "user:resource"
@@ -53,6 +83,7 @@ export const BACKEND_LIMITS = {
  * ```
  *
  * @see specs/redis-backend.md#dual-key-storage-pattern - Redis reserve bytes calculation
+ * @see specs/postgres-backend.md#lock-table-requirements - PostgreSQL reserve bytes (0) rationale
  * @see specs/firestore-backend.md#lock-documents - Firestore reserve bytes (0) rationale
  */
 export const RESERVE_BYTES = {
@@ -61,6 +92,11 @@ export const RESERVE_BYTES = {
    * Formula: ":id:" (4 bytes) + lockId (22 bytes) = 26 bytes
    */
   REDIS: 26,
+  /**
+   * PostgreSQL reserve bytes: 0
+   * Formula: 0 bytes (separate tables with independent primary keys)
+   */
+  POSTGRES: 0,
   /**
    * Firestore reserve bytes: 0
    * Formula: 0 bytes (no derived keys with suffixes)

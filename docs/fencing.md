@@ -152,7 +152,7 @@ if (result.ok) {
 
 ## TypeScript Guarantees
 
-Both Redis and Firestore backends provide fencing tokens at compile time—no runtime assertions needed:
+Redis, PostgreSQL, and Firestore backends provide fencing tokens at compile time—no runtime assertions needed:
 
 ```typescript
 import { createRedisBackend } from "syncguard/redis";
@@ -349,7 +349,7 @@ SyncGuard uses **15-digit zero-padded decimal strings** across all backends:
 
 - Guarantees full safety within Lua's 53-bit precision limit (2^53-1 ≈ 9.007e15)
 - Eliminates ALL risk of floating-point rounding errors in Redis
-- Consistent format across Redis and Firestore
+- Consistent format across Redis, PostgreSQL, and Firestore
 - Lexicographic comparison works correctly
 - JSON-safe (no precision loss from BigInt serialization)
 
@@ -372,7 +372,7 @@ SyncGuard enforces strict overflow limits to prevent fence counter wraparound:
 
 - **Hard limit**: Operations fail with `LockError("Internal")` when fence exceeds `FENCE_THRESHOLDS.MAX`
 - **Early warning**: Logs warnings when fence exceeds `FENCE_THRESHOLDS.WARN` (10% before limit)
-- **Cross-backend consistency**: Both Redis and Firestore enforce identical limits using canonical constants from `common/constants.ts`
+- **Cross-backend consistency**: Redis, PostgreSQL, and Firestore enforce identical limits using canonical constants from `common/constants.ts`
 
 **When overflow occurs**:
 
@@ -404,6 +404,7 @@ If overflow occurs, you must rotate to a new key namespace. Resetting fence coun
 You can't reset counters safely in production—monotonicity is the security guarantee. If you need to reset for testing:
 
 - **Redis**: `DEL syncguard:fence:resource:123`
+- **PostgreSQL**: `DELETE FROM syncguard_fence_counters WHERE fence_key = ...`
 - **Firestore**: Delete the document in the `fence_counters` collection
 
 Never reset production counters. Use key rotation instead.

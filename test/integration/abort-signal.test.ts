@@ -203,6 +203,7 @@ describe("AbortSignal support", () => {
 
     // Note: Firestore emulator can be slow to release locks (up to 30s per docs)
     // Use extended timeout to accommodate emulator's lock release behavior
+    // Increased timeout for CI/CD environments where emulator can be particularly slow
     test(
       "release respects AbortSignal",
       async () => {
@@ -238,7 +239,7 @@ describe("AbortSignal support", () => {
           // Lock may have expired or been cleaned up - this is acceptable
         }
       },
-      { timeout: 10000 },
+      { timeout: 20000 },
     );
 
     // Note: Firestore emulator can be slow to release locks (up to 30s per docs)
@@ -279,7 +280,7 @@ describe("AbortSignal support", () => {
           // Lock may have expired or been cleaned up - this is acceptable
         }
       },
-      { timeout: 10000 },
+      { timeout: 20000 },
     );
 
     test("isLocked respects AbortSignal", async () => {

@@ -6,28 +6,31 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![Discord](https://img.shields.io/discord/643523529131950086?label=Discord&logo=discord&logoColor=white)](https://discord.gg/EnbEa7Gsxg)
 
-TypeScript distributed lock library that prevents race conditions across services. Supports Redis and Firestore backends with automatic cleanup, fencing tokens, and bulletproof concurrency control.
+TypeScript distributed lock library that prevents race conditions across services. Supports Redis, PostgreSQL, and Firestore backends with automatic cleanup, fencing tokens, and bulletproof concurrency control.
 
 ## Installation
 
 ```bash
+# Redis backend (recommended)
+npm install syncguard ioredis
+
+# PostgreSQL backend
+npm install syncguard postgres
+
 # Firestore backend
 npm install syncguard @google-cloud/firestore
-
-# Redis backend
-npm install syncguard ioredis
 ```
 
 ## Usage
 
-### Quick Start
+### Quick Start (Redis)
 
 ```typescript
-import { createLock } from "syncguard/firestore";
-import { Firestore } from "@google-cloud/firestore";
+import { createLock } from "syncguard/redis";
+import Redis from "ioredis";
 
-const db = new Firestore();
-const lock = createLock(db);
+const redis = new Redis();
+const lock = createLock(redis);
 
 // Prevent duplicate payment processing
 await lock(
@@ -42,14 +45,31 @@ await lock(
 );
 ```
 
-### Using Redis
+### Using PostgreSQL
 
 ```typescript
-import { createLock } from "syncguard/redis";
-import Redis from "ioredis";
+import { createLock } from "syncguard/postgres";
+import postgres from "postgres";
 
-const redis = new Redis();
-const lock = createLock(redis);
+const sql = postgres("postgresql://localhost:5432/myapp");
+const lock = createLock(sql);
+
+await lock(
+  async () => {
+    // Your critical section
+  },
+  { key: "resource:123" },
+);
+```
+
+### Using Firestore
+
+```typescript
+import { createLock } from "syncguard/firestore";
+import { Firestore } from "@google-cloud/firestore";
+
+const db = new Firestore();
+const lock = createLock(db);
 
 await lock(
   async () => {
@@ -120,21 +140,29 @@ await lock(workFn, {
 ### Backend Configuration
 
 ```typescript
+// Redis
+const lock = createLock(redis, {
+  keyPrefix: "myapp", // Default: "syncguard"
+});
+
+// PostgreSQL
+const lock = createLock(sql, {
+  tableName: "app_locks", // Default: "syncguard_locks"
+  fenceTableName: "app_fences", // Default: "syncguard_fence_counters"
+});
+
 // Firestore
 const lock = createLock(db, {
   collection: "app_locks", // Default: "locks"
   fenceCollection: "app_fences", // Default: "fence_counters"
 });
-
-// Redis
-const lock = createLock(redis, {
-  keyPrefix: "myapp", // Default: "syncguard"
-});
 ```
 
-::: warning Firestore Index Required
-Firestore requires a single-field ascending index on the `lockId` field in your locks collection. See [Firestore setup docs](https://kriasoft.com/syncguard/firestore#required-index) for details.
-:::
+::: warning Backend-Specific Setup
+
+- **PostgreSQL**: Requires indexes on `lock_id` and `expires_at_ms` columns. Tables are auto-created by default.
+- **Firestore**: Requires a single-field ascending index on the `lockId` field. See [setup docs](https://kriasoft.com/syncguard/firestore#required-index).
+  :::
 
 ## Error Handling
 
@@ -200,7 +228,7 @@ const checkRateLimit = async (userId: string) => {
 - 🔒 **Bulletproof concurrency** - Atomic operations prevent race conditions
 - 🛡️ **Fencing tokens** - Monotonic counters protect against stale writes
 - 🧹 **Automatic cleanup** - TTL-based expiration, no manual cleanup needed
-- 🔄 **Backend flexibility** - Redis (fast) or Firestore (serverless)
+- 🔄 **Backend flexibility** - Redis (performance), PostgreSQL (zero overhead), or Firestore (serverless)
 - 🔁 **Smart retries** - Exponential backoff with jitter handles contention
 - 💙 **TypeScript-first** - Full type safety with compile-time guarantees
 - 📊 **Optional telemetry** - Opt-in observability via decorator pattern
