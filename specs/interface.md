@@ -143,6 +143,121 @@ const fenceKey = makeStorageKey(
 
 ---
 
+## Public Types (Normative)
+
+This section defines the **normative type shapes** for SyncGuard's public API. These types establish the contract that all implementations MUST follow.
+
+**TypeScript Reference Implementation**: See `common/types.ts` for the canonical TypeScript definitions that implement this specification.
+
+### Hash Identifier Format
+
+```typescript
+type Hash = string; // 24-character hex string (96-bit non-cryptographic hash)
+```
+
+**Requirements:**
+
+- **Algorithm**: Triple-hash (3×32-bit) for 96-bit collision resistance
+- **Encoding**: Lowercase hexadecimal, exactly 24 characters
+- **Normalization**: Input MUST be Unicode NFC normalized before hashing
+- **Collision Probability**: ~6.3e-12 at 10^9 distinct keys
+- **Canonical Implementation**: `hashKey()` in `common/crypto.ts`
+- **Use Case**: Sanitized identifiers for telemetry, logging, and UI (non-cryptographic)
+
+**Security Note**: This is a **non-cryptographic hash** for observability only. Do NOT use for security-sensitive collision resistance.
+
+---
+
+### Lock Information Types
+
+#### LockInfo (Sanitized Output)
+
+```typescript
+interface LockInfo<C extends BackendCapabilities> {
+  keyHash: Hash; // 24-char hex hash of the key
+  lockIdHash: Hash; // 24-char hex hash of the lockId
+  expiresAtMs: number; // Unix timestamp (milliseconds)
+  acquiredAtMs: number; // Unix timestamp (milliseconds)
+  fence?: Fence; // Present when C["supportsFencing"] === true
+}
+```
+
+**Requirements:**
+
+- All `lookup()` operations MUST return this sanitized shape (never raw keys/lockIds)
+- `keyHash` and `lockIdHash` MUST be computed via `hashKey()` from `common/crypto.ts`
+- `expiresAtMs` and `acquiredAtMs` MUST be Unix timestamps in milliseconds
+- `fence` MUST be included if and only if `backend.capabilities.supportsFencing === true`
+- Returns `null` for both expired and not-found locks (no distinction in public API)
+
+**Rationale**: Prevents accidental logging of sensitive identifiers. Security-first design with compile-time guarantees.
+
+---
+
+#### LockInfoDebug (Raw Identifiers for Debugging)
+
+```typescript
+interface LockInfoDebug<C extends BackendCapabilities> extends LockInfo<C> {
+  key: string; // Raw user-provided key (SENSITIVE)
+  lockId: string; // Raw lock identifier (SENSITIVE)
+}
+```
+
+**Requirements:**
+
+- Available ONLY via `getByKeyRaw()` and `getByIdRaw()` helper functions (NOT from `backend.lookup()`)
+- MUST include all fields from `LockInfo<C>` plus raw identifiers
+- **SECURITY WARNING**: Contains sensitive data - use only for debugging/diagnostics
+
+**Rationale**: Explicit opt-in for raw data access. Prevents accidental exposure in production logs.
+
+---
+
+### Telemetry Event Types
+
+```typescript
+type LockEvent = {
+  type: "acquire" | "release" | "extend" | "isLocked" | "lookup";
+  result: "ok" | "fail";
+  keyHash?: Hash; // Present when operation involves a key
+  lockIdHash?: Hash; // Present when operation involves a lockId
+  reason?: "locked" | "expired" | "not-found";
+  key?: string; // Raw key (only when includeRaw permits)
+  lockId?: string; // Raw lockId (only when includeRaw permits)
+};
+```
+
+**Requirements:**
+
+- Emitted by `withTelemetry()` decorator when telemetry is enabled
+- `type` MUST be one of the five core operations
+- `result` MUST be either "ok" (success) or "fail" (failure)
+- `keyHash`/`lockIdHash` computed lazily only when telemetry active (zero-cost when disabled)
+- `reason` field semantics:
+  - **"locked"**: Acquire failed due to contention (key already held)
+  - **"expired"**: Operation failed because lock expired before mutation
+  - **"not-found"**: Operation failed because lock doesn't exist
+- `key` and `lockId` raw fields MUST only be present when `includeRaw` configuration permits
+- Telemetry callbacks MUST NOT be awaited; errors MUST NOT affect lock operations (async isolation)
+
+**Operation-Specific Reason Values:**
+
+| Operation  | Success (`ok: true`) | Failure (`ok: false`) Reasons |
+| ---------- | -------------------- | ----------------------------- |
+| `acquire`  | No reason            | `"locked"`                    |
+| `release`  | No reason            | `"expired"` \| `"not-found"`  |
+| `extend`   | No reason            | `"expired"` \| `"not-found"`  |
+| `isLocked` | No reason            | No reason (boolean result)    |
+| `lookup`   | No reason            | No reason (null result)       |
+
+**Rationale**:
+
+- Detailed reasons for operational monitoring without cluttering public API
+- "expired" vs "not-found" distinction helps diagnose cleanup lag vs logic errors
+- Zero-cost abstraction when telemetry disabled (no hash computation overhead)
+
+---
+
 ## Backend Capabilities
 
 ### Requirements
@@ -491,7 +606,7 @@ Different backends use different time authorities, each with distinct operationa
 - **Redis server clock jumps backward**: Locks may appear expired prematurely
   - _Mitigation_: Use NTP on Redis server, monitor system time jumps
 - **Redis server clock drift**: Lock expiry becomes less predictable
-  - _Mitigation_: Standard NTP sync on Redis host (±100ms typical)
+  - _Mitigation_: Standard NTP sync on Redis host (typical target: ±100 ms accuracy)
 - **Clock sync issues in Redis cluster**: Different nodes disagree on lock state
   - _Mitigation_: Ensure cluster nodes share time source, test failover behavior
 
@@ -500,16 +615,13 @@ Different backends use different time authorities, each with distinct operationa
 **Pre-Production:**
 
 - ✅ **MANDATORY**: Deploy NTP synchronization on ALL clients
-- ✅ **MANDATORY**: Implement NTP sync monitoring in deployment pipeline
-- ✅ **MANDATORY**: Fail deployments with >200ms clock drift
+- ✅ **MANDATORY**: Implement NTP sync monitoring in deployment pipeline per [Firestore Clock Synchronization Requirements](firestore-backend.md#firestore-clock-sync-requirements)
 - ✅ **MANDATORY**: Add application health checks to detect clock skew
-- ✅ Document acceptable clock skew thresholds (recommend ±100ms)
 - ✅ Test lock behavior with simulated clock skew scenarios
 
 **Production Monitoring:**
 
-- ✅ **CRITICAL**: Monitor client clock drift via system metrics
-- ✅ **CRITICAL**: Alert on clients exceeding ±200ms drift
+- ✅ **CRITICAL**: Monitor client clock drift via system metrics per [Firestore Clock Synchronization Requirements](firestore-backend.md#firestore-clock-sync-requirements)
 - ✅ Track lock contention patterns (may indicate clock skew issues)
 - ✅ Monitor lock acquisition failures and correlate with client time drift
 
@@ -521,12 +633,12 @@ Different backends use different time authorities, each with distinct operationa
 
 **Failure Scenarios & Mitigations:**
 
-- **Client clock skew >1000ms**: Lock safety violations, race conditions
-  - _Mitigation_: MANDATORY NTP sync, deployment checks, health monitoring
+- **Client clock skew exceeds safety margin**: Lock safety violations, race conditions
+  - _Mitigation_: MANDATORY NTP sync, deployment checks per [Firestore Clock Synchronization Requirements](firestore-backend.md#firestore-clock-sync-requirements)
 - **One client's clock ahead**: May see other clients' locks as expired early
-  - _Mitigation_: 1000ms tolerance provides safety margin; enforce ±100ms sync
+  - _Mitigation_: TIME_TOLERANCE_MS (1000 ms) provides safety margin; enforce operational policy ladder
 - **One client's clock behind**: May fail to acquire locks when they're actually free
-  - _Mitigation_: Clock monitoring alerts, automated remediation
+  - _Mitigation_: Clock monitoring alerts per operational policy, automated remediation
 - **NTP service outage**: Gradual clock drift across clients
   - _Mitigation_: Monitor NTP health, alert on sync failures, consider Redis fallback
 
@@ -737,7 +849,7 @@ The chosen approach MUST support atomic ownership verification within the same t
 - **Storage Flexibility**: Backends MAY store fence values as numbers internally but MUST preserve full precision and convert to 15-digit zero-padded strings at API boundary
 - **Overflow Enforcement**: Backends MUST parse/validate returned fence values and throw `LockError("Internal")` if fence > `FENCE_THRESHOLDS.MAX`; backends MUST log warnings via the shared `logFenceWarning()` utility when fence > `FENCE_THRESHOLDS.WARN` for early operational signals. Canonical values in `common/constants.ts`.
 - **Validation**: `ttlMs` MUST be a positive integer (ms); otherwise throw `LockError("InvalidArgument")`. Helper functions MAY apply defaults before calling backend operations.
-- **Storage Key Limits**: Backends MUST document their effective storage-key byte limits after prefixing/namespacing. If user key + prefix exceeds the backend's storage limit, backend MUST either throw `LockError("InvalidArgument")` or use collision-safe truncation with hashing. All backends MUST enforce the common 512-byte user key limit first.
+- **Storage Key Limits**: Backends MUST document their effective storage-key byte limits after prefixing/namespacing. If user key + prefix exceeds the backend's storage limit, backend MUST apply standardized hash-truncation as defined in [Standardized Storage Key Generation](#storage-key-generation). Backends MAY throw `LockError("InvalidArgument")` only if even the truncated form exceeds the backend's absolute limit (e.g., prefix too long). All backends MUST enforce the common 512-byte user key limit first.
 - **Performance**: Fast indexed lookups are the target; backends SHOULD document expected performance characteristics
 
 ### Acquire Operation Rationale & Notes
@@ -760,7 +872,7 @@ The chosen approach MUST support atomic ownership verification within the same t
 - **Return Value**: Return `{ ok: true }` when the mutation was applied. Return `{ ok: false }` otherwise. System/validation/auth/transport failures MUST throw `LockError`; domain outcomes use `ReleaseResult`.
 - **Telemetry**: Emit `release-failed` events with detailed `reason` ("expired" | "not-found") for operational monitoring while keeping public API simple.
 - **LockId-Only Semantics**: Since release operates via `lockId` with reverse mapping to find the key, ownership conflicts are eliminated in normal operation. However, backends MAY transiently observe ownership mismatches due to stale indices (cleanup race conditions, TTL drift, etc.).
-- **At-most-once effect**: Only one `release` may succeed. Concurrent or repeated `release(lockId)` calls for the same lock MUST NOT delete any other owner's lock and SHOULD return `{ ok: false, reason: "not-found" }` once the lock is gone.
+- **At-most-once effect**: Only one `release` may succeed. Concurrent or repeated `release(lockId)` calls for the same lock MUST NOT delete any other owner's lock and MUST return `{ ok: false }` once the lock is gone. The telemetry decorator MAY emit detailed reasons ("expired" | "not-found") via events for operational monitoring.
 
 ### Release Operation Rationale & Notes
 
@@ -1036,7 +1148,7 @@ const config = {
 **MUST implement**: AbortSignal support for cancellation
 
 - All backend operations (acquire, release, extend, isLocked, lookup) MUST accept optional `signal?: AbortSignal` parameter
-- **Redis backend**: Pass signal directly to ioredis (native support via network layer)
+- **Redis backend**: Check `signal.aborted` before issuing commands and throw `LockError("Aborted")` if aborted. After dispatch, mid-flight abort cannot be guaranteed—ioredis does not accept AbortSignal parameters. Best-effort cancellation only.
 - **Firestore backend**: Manual cancellation checks via `checkAborted()` helper at strategic points (before reads, after reads, before writes)
 - Operations MUST throw `LockError("Aborted")` when signal is aborted
 - See backend-specific specs for detailed implementation patterns

@@ -4,6 +4,19 @@
 import { LockError } from "../common/backend.js";
 
 /**
+ * Checks if an AbortSignal has been aborted and throws LockError if so.
+ * Redis backend uses pre-dispatch checking since ioredis does not accept AbortSignal parameters.
+ *
+ * @param signal - Optional AbortSignal to check
+ * @throws LockError("Aborted") if signal is aborted
+ */
+export function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new LockError("Aborted", "Operation aborted by signal");
+  }
+}
+
+/**
  * Maps Redis client errors to standardized LockError codes.
  *
  * @param error - Redis client error or string
@@ -13,12 +26,18 @@ import { LockError } from "../common/backend.js";
 export function mapRedisError(error: any): LockError {
   const errorMessage = error instanceof Error ? error.message : String(error);
 
+  // Network timeout errors
+  if (errorMessage.includes("timeout")) {
+    return new LockError("NetworkTimeout", `Redis timeout: ${errorMessage}`, {
+      cause: error,
+    });
+  }
+
   // Connection and network errors
   if (
     errorMessage.includes("ECONNRESET") ||
     errorMessage.includes("ENOTFOUND") ||
-    errorMessage.includes("ECONNREFUSED") ||
-    errorMessage.includes("timeout")
+    errorMessage.includes("ECONNREFUSED")
   ) {
     return new LockError(
       "ServiceUnavailable",

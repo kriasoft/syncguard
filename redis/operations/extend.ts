@@ -8,12 +8,16 @@ import {
   makeStorageKey,
   validateLockId,
 } from "../../common/backend.js";
+import {
+  type MutationReason,
+  FAILURE_REASON,
+} from "../../common/backend-semantics.js";
 import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapRedisError } from "../errors.js";
+import { checkAborted, mapRedisError } from "../errors.js";
 import { EXTEND_SCRIPT } from "../scripts.js";
 import type { RedisConfig } from "../types.js";
 
-/** Redis client with eval support and optional cached script method */
+/** Redis client with eval and optional cached extendLock method */
 interface RedisWithCommands {
   eval(
     script: string,
@@ -29,8 +33,8 @@ interface RedisWithCommands {
 }
 
 /**
- * Creates extend operation that atomically renews lock TTL.
- * @see specs/redis-backend.md for Lua script implementation
+ * Creates extend operation that atomically renews lock TTL (replaces entirely, not additive).
+ * @see specs/redis-backend.md
  */
 export function createExtendOperation(
   redis: RedisWithCommands,
@@ -38,6 +42,9 @@ export function createExtendOperation(
 ) {
   return async (opts: LockOp & { ttlMs: number }): Promise<ExtendResult> => {
     try {
+      // Pre-dispatch abort check (ioredis does not accept AbortSignal)
+      checkAborted(opts.signal);
+
       validateLockId(opts.lockId);
 
       if (!Number.isInteger(opts.ttlMs) || opts.ttlMs <= 0) {
@@ -57,8 +64,7 @@ export function createExtendOperation(
         RESERVE_BYTES,
       );
 
-      // ADR-013: Prefer cached script method (extendLock) over eval for performance
-      // No longer pass keyPrefix - lockKey is retrieved directly from index
+      // Prefer cached script (extendLock) over eval for performance (ADR-013)
       const scriptResult = redis.extendLock
         ? await redis.extendLock(
             lockIdKey,
@@ -68,18 +74,17 @@ export function createExtendOperation(
           )
         : ((await redis.eval(
             EXTEND_SCRIPT,
-            1, // Only 1 key now (lockIdKey)
+            1,
             lockIdKey,
-            opts.lockId, // ARGV[1]
-            TIME_TOLERANCE_MS.toString(), // ARGV[2]
-            opts.ttlMs.toString(), // ARGV[3]
+            opts.lockId,
+            TIME_TOLERANCE_MS.toString(),
+            opts.ttlMs.toString(),
           )) as [number, number] | number);
 
       // Script returns: [1, expiresAtMs] on success, 0 on failure
       if (Array.isArray(scriptResult)) {
         const [status, expiresAtMs] = scriptResult;
         if (status === 1) {
-          // Robustness check: ensure expiresAtMs is present
           if (typeof expiresAtMs !== "number") {
             throw new LockError(
               "Internal",
@@ -91,12 +96,26 @@ export function createExtendOperation(
             expiresAtMs,
           };
         }
-        return { ok: false };
+        // Failure: attach telemetry metadata (0=mismatch, -1=not found, -2=expired)
+        const result: ExtendResult = { ok: false };
+        let reason: MutationReason;
+        if (status === -2) {
+          reason = "expired";
+        } else {
+          reason = "not-found"; // -1 or 0 → "not-found"
+        }
+        (result as any)[FAILURE_REASON] = { reason };
+        return result;
       } else if (scriptResult === 1) {
         // Test mock: success without expiresAtMs
         return { ok: true, expiresAtMs: Date.now() + opts.ttlMs };
       } else {
-        return { ok: false };
+        // Test mock: failure
+        const result: ExtendResult = { ok: false };
+        (result as any)[FAILURE_REASON] = {
+          reason: "not-found" as MutationReason,
+        };
+        return result;
       }
     } catch (error) {
       if (error instanceof LockError) {

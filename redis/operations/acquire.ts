@@ -12,7 +12,7 @@ import {
   normalizeAndValidateKey,
 } from "../../common/backend.js";
 import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapRedisError } from "../errors.js";
+import { checkAborted, mapRedisError } from "../errors.js";
 import { ACQUIRE_SCRIPT } from "../scripts.js";
 import type { RedisCapabilities, RedisConfig } from "../types.js";
 
@@ -47,6 +47,9 @@ export function createAcquireOperation(
     opts: KeyOp & { ttlMs: number },
   ): Promise<AcquireResult<RedisCapabilities>> => {
     try {
+      // Pre-dispatch abort check (ioredis does not accept AbortSignal)
+      checkAborted(opts.signal);
+
       normalizeAndValidateKey(opts.key);
 
       if (!Number.isInteger(opts.ttlMs) || opts.ttlMs <= 0) {

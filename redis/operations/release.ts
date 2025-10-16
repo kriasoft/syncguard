@@ -8,12 +8,16 @@ import {
   makeStorageKey,
   validateLockId,
 } from "../../common/backend.js";
+import {
+  type MutationReason,
+  FAILURE_REASON,
+} from "../../common/backend-semantics.js";
 import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapRedisError } from "../errors.js";
+import { checkAborted, mapRedisError } from "../errors.js";
 import { RELEASE_SCRIPT } from "../scripts.js";
 import type { RedisConfig } from "../types.js";
 
-/** Redis client with script caching support (see: scripts.ts) */
+/** Redis client with eval and optional cached releaseLock method */
 interface RedisWithCommands {
   eval(
     script: string,
@@ -28,8 +32,8 @@ interface RedisWithCommands {
 }
 
 /**
- * Creates release operation using Lua script for atomic ownership check + delete.
- * @see ../scripts.ts for RELEASE_SCRIPT implementation
+ * Creates release operation with atomic ownership verification and deletion.
+ * @see redis/scripts.ts
  */
 export function createReleaseOperation(
   redis: RedisWithCommands,
@@ -37,6 +41,9 @@ export function createReleaseOperation(
 ) {
   return async (opts: LockOp): Promise<ReleaseResult> => {
     try {
+      // Pre-dispatch abort check (ioredis does not accept AbortSignal)
+      checkAborted(opts.signal);
+
       validateLockId(opts.lockId);
 
       const REDIS_LIMIT_BYTES = 1000;
@@ -51,8 +58,7 @@ export function createReleaseOperation(
 
       const toleranceMs = TIME_TOLERANCE_MS;
 
-      // ADR-013: Use cached script (releaseLock) if available, otherwise eval directly
-      // No longer pass keyPrefix - lockKey is retrieved directly from index
+      // Prefer cached script (releaseLock) over eval for performance (ADR-013)
       const scriptResult = redis.releaseLock
         ? await redis.releaseLock(
             lockIdKey,
@@ -61,14 +67,28 @@ export function createReleaseOperation(
           )
         : ((await redis.eval(
             RELEASE_SCRIPT,
-            1, // Only 1 key now (lockIdKey)
+            1,
             lockIdKey,
             opts.lockId,
             toleranceMs.toString(),
           )) as number);
 
-      // Script returns 1 if lock was owned and deleted, 0 otherwise
-      return { ok: scriptResult === 1 };
+      // Script returns: 1=success, 0=mismatch, -1=not found, -2=expired
+      const ok = scriptResult === 1;
+      const result: ReleaseResult = { ok };
+
+      // Attach telemetry metadata (hidden from public API)
+      if (!ok) {
+        let reason: MutationReason;
+        if (scriptResult === -2) {
+          reason = "expired";
+        } else {
+          reason = "not-found"; // -1 or 0 → "not-found"
+        }
+        (result as any)[FAILURE_REASON] = { reason };
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof LockError) {
         throw error;

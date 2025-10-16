@@ -83,9 +83,31 @@ Each major section follows this structure:
 
 **Important**: These keywords appear ONLY in Requirements sections, never in Rationale & Notes sections.
 
+## Architecture Decision Records (ADRs)
+
+ADRs document **why** decisions were made, not **how** to implement them. They focus on design rationale, tradeoffs, and alternatives—not implementation details.
+
+### Content Separation
+
+| Content Type                   | Belongs In                  | ADRs contain                     |
+| ------------------------------ | --------------------------- | -------------------------------- |
+| Requirements (MUST/SHOULD/MAY) | interface.md, backend specs | Rationale only                   |
+| Implementation details         | interface.md, backend specs | Cross-references                 |
+| **Design decisions**           | **adrs.md**                 | Context, rationale, consequences |
+
+### Key Principle
+
+**ADRs explain WHY. Specifications define WHAT.**
+
+See [adrs.md](./adrs.md) for the complete ADR template, writing guidelines, and examples.
+
 ## Backend Delta Pattern
 
-Backend specs (`redis-backend.md`, `firestore-backend.md`) do not repeat common requirements. They document:
+Backend specs (`redis-backend.md`, `firestore-backend.md`) extend the core interface specification (`interface.md`) with implementation-specific details. To enhance machine-parseability and prevent agent drift (per ADR-012), backend specs:
+
+**MUST restate** key inherited requirements as explicit MUST/SHOULD bullets in their operation requirement sections, with cross-references to the rationale in `interface.md` and ADRs (e.g., "see ADR-010 for rationale").
+
+**MUST document** backend-specific implementation details:
 
 - Storage schema and key design
 - Atomic operation implementation (Lua scripts, transactions)
@@ -93,4 +115,4 @@ Backend specs (`redis-backend.md`, `firestore-backend.md`) do not repeat common 
 - Performance characteristics and limits
 - TTL/expiration semantics
 
-All other requirements (types, validation, error classification) are inherited from `interface.md`.
+This pattern ensures agents can verify compliance from backend-specific operation tables alone, without requiring complex cross-referencing during implementation validation.

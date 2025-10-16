@@ -70,8 +70,8 @@ This specification uses a **normative vs rationale** pattern:
 - ALL mutating operations MUST use Lua scripts
 - Scripts centralized in `redis/scripts.ts` with descriptive comments
 - Use `cjson.decode()/cjson.encode()` for JSON handling in Lua
-- Return 1 for success, 0 for failure from scripts
-- Scripts handle lock contention (return 0), backend throws LockError for Redis errors
+- Script return codes MUST follow operation-specific semantics (see [Script Return Code Semantics](#script-implementation-patterns) for complete mapping)
+- Scripts handle lock contention via return codes, backend throws LockError for Redis errors
 - Pass all required data as KEYS and ARGV to avoid closure issues
 
 ### Rationale & Notes
@@ -183,169 +183,50 @@ if (result.ok) {
 
 ## Script Implementation Patterns
 
-### Acquisition Script Requirements
+**NORMATIVE IMPLEMENTATION**: See `redis/scripts.ts` for canonical Lua scripts with inline documentation.
 
-```lua
--- Acquire Script Signature:
--- KEYS[1] = lockKey (e.g., "syncguard:resource:123")
--- KEYS[2] = lockIdKey (e.g., "syncguard:id:abc123xyz")
--- KEYS[3] = fenceKey (e.g., "syncguard:fence:resource:123")
--- ARGV[1] = lockId
--- ARGV[2] = ttlMs
--- ARGV[3] = toleranceMs
--- ARGV[4] = storageKey (full lockKey post-truncation, for index storage per ADR-013)
--- ARGV[5] = userKey (original normalized key, for lockData)
---
--- @returns {1, fence, expiresAtMs} on success, 0 on contention
+### Script Characteristics
 
-local lockKey = KEYS[1]
-local lockIdKey = KEYS[2]
-local fenceKey = KEYS[3]
-local lockId = ARGV[1]
-local ttlMs = tonumber(ARGV[2])
-local toleranceMs = tonumber(ARGV[3])
-local storageKey = ARGV[4]  -- Full lockKey for index (ADR-013)
-local userKey = ARGV[5]     -- Original key for lockData
+Scripts implement these atomic operation patterns:
 
--- 1. Get server time and check existing lock expiration (using canonical time calculation)
-local time = redis.call('TIME')
-local nowMs = time[1] * 1000 + math.floor(time[2] / 1000) -- See calculateRedisServerTimeMs()
-local existingData = redis.call('GET', lockKey)
-if existingData then
-  local data = cjson.decode(existingData)
-  if data.expiresAtMs > (nowMs - toleranceMs) then -- See isLive() predicate
-    return 0  -- Still locked (locked)
-  end
-  -- Clean up expired lockId index
-  if data.lockId then
-    redis.call('DEL', lockIdKey)
-  end
-end
+- **Acquire**: Expiry check → fence increment → dual-key write with identical TTL
+- **Release/Extend**: Reverse lookup (ADR-013) → ownership verification (ADR-003) → mutation
+- **Lookup**: Atomic multi-key read with ownership verification
 
--- 2. Generate monotonic fencing token (always)
--- Format immediately as 15-digit string for guaranteed Lua precision safety
-local fence = string.format("%015d", redis.call('INCR', fenceKey))
--- Backend MUST parse returned fence and throw LockError("Internal") if fence > FENCE_THRESHOLDS.MAX
--- Backend MUST log warnings via logFenceWarning() when fence > FENCE_THRESHOLDS.WARN
--- See common/constants.ts for canonical threshold values
+All scripts use:
 
--- 3. Atomically set both keys with identical TTL
-local expiresAtMs = nowMs + ttlMs
-local lockData = cjson.encode({
-  lockId=lockId,
-  expiresAtMs=expiresAtMs,
-  acquiredAtMs=nowMs,
-  key=userKey,  -- Store original user key in lockData for diagnostics
-  fence=fence   -- fence is string to avoid precision loss
-})
-redis.call('SET', lockKey, lockData, 'PX', ttlMs)
-redis.call('SET', lockIdKey, storageKey, 'PX', ttlMs)  -- ADR-013: Store full lockKey for reverse lookup
-return {1, fence, expiresAtMs}  -- Success with fence token and authoritative expiresAtMs
-```
+- Canonical time calculation: `time[1] * 1000 + math.floor(time[2] / 1000)` (see `calculateRedisServerTimeMs()`)
+- Unified liveness predicate: `isLive()` pattern from `common/time-predicates.ts`
+- 15-digit fence formatting: `string.format("%015d", redis.call('INCR', fenceKey))` for Lua precision safety
 
-### Release/Extend Script Requirements
+### Script Return Code Semantics
 
-```lua
--- Release Script Signature:
--- KEYS[1] = lockIdKey (e.g., "syncguard:id:abc123xyz")
--- ARGV[1] = lockId
--- ARGV[2] = toleranceMs
+Backend operations use these standardized return codes for internal condition tracking:
 
--- Extend Script Signature (includes ARGV[3]):
--- ARGV[3] = ttlMs (extend only)
---
--- @returns 1 (release success) or {1, newExpiresAtMs} (extend success), 0 (ownership mismatch), -1 (not found), -2 (expired)
+**Acquire**:
 
-local lockIdKey = KEYS[1]
-local lockId = ARGV[1]
-local toleranceMs = tonumber(ARGV[2])
-local ttlMs = tonumber(ARGV[3]) -- Only for extend operation
+- `0` → contention (lock held by another process)
+- `[1, fence, expiresAtMs]` → success with fence token and authoritative server-time expiry
 
--- 1. Get server time (using canonical time calculation)
-local time = redis.call('TIME')
-local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
+**Release**:
 
--- 2. Get lockKey from index (ADR-013: index stores full lockKey directly)
-local lockKey = redis.call('GET', lockIdKey)
-if not lockKey then return -1 end  -- Lock not found
+- `1` → success
+- `0` → ownership mismatch (ADR-003)
+- `-1` → not found
+- `-2` → expired
 
--- 3. Verify lock data exists and parse
-local lockData = redis.call('GET', lockKey)
-if not lockData then return -1 end  -- Lock not found
+**Extend**:
 
-local data = cjson.decode(lockData)
-
--- 4. Check expiration (using canonical liveness predicate)
-if data.expiresAtMs <= (nowMs - toleranceMs) then
-  -- Clean up expired lock
-  redis.call('DEL', lockKey, lockIdKey)
-  return -2  -- Lock expired
-end
-
--- 5. Verify ownership (ADR-003: explicit verification required)
-if data.lockId ~= lockId then return 0 end  -- Ownership mismatch
-
--- 6. Perform operation
--- For release: delete both keys
-if not ttlMs then
-  redis.call('DEL', lockKey, lockIdKey)
-  return 1  -- Release success
-end
-
--- For extend: update TTL (replaces remaining TTL entirely)
-local newExpiresAtMs = nowMs + ttlMs
-data.expiresAtMs = newExpiresAtMs
-redis.call('SET', lockKey, cjson.encode(data), 'PX', ttlMs)
-redis.call('SET', lockIdKey, lockKey, 'PX', ttlMs)  -- ADR-013: Re-store full lockKey
-return {1, newExpiresAtMs}  -- Extend success with authoritative expiresAtMs
-```
-
-### Atomic Lookup Script Requirements
-
-```lua
--- Lookup Script Signature:
--- KEYS[1] = lockIdKey (e.g., "syncguard:id:abc123xyz")
--- ARGV[1] = lockId
--- ARGV[2] = toleranceMs
-
-local lockIdKey = KEYS[1]
-local lockId = ARGV[1]
-local toleranceMs = tonumber(ARGV[2])
-
--- 1. Get server time for expiry check
-local time = redis.call('TIME')
-local nowMs = time[1] * 1000 + math.floor(time[2] / 1000)
-
--- 2. Get lockKey from index (ADR-013: index stores full lockKey directly)
-local lockKey = redis.call('GET', lockIdKey)
-if not lockKey then return nil end  -- Lock not found
-
--- 3. Fetch main lock data
-local lockData = redis.call('GET', lockKey)
-if not lockData then return nil end  -- Lock not found
-
--- 4. Parse and verify ownership
-local data = cjson.decode(lockData)
-if data.lockId ~= lockId then return nil end  -- Ownership mismatch
-
--- 5. Check expiration using canonical predicate
-if data.expiresAtMs <= (nowMs - toleranceMs) then return nil end  -- Expired
-
--- 6. Return lock info (backend converts to LockInfo)
-return lockData  -- Contains all fields needed for LockInfo
-```
+- `[1, newExpiresAtMs]` → success with authoritative server-time expiry
+- `0` → ownership mismatch (ADR-003)
+- `-1` → not found
+- `-2` → expired
 
 ### Rationale & Notes
 
-**Why return lockData as JSON**: TypeScript layer handles sanitization. Lua returns raw data for atomicity, TypeScript converts to `LockInfo<C>` with sanitized hashes.
+**Why centralized in redis/scripts.ts**: Single source of truth prevents script duplication and drift. See module for KEYS/ARGV signatures and complete implementation details.
 
-**Why multiple return codes**: Enables cheap internal condition tracking for telemetry without additional I/O.
-
-**Script Return Code Semantics**:
-
-- Acquire: `0` → contention, `[1, fence, expiresAtMs]` → success with authoritative server-time expiry
-- Release: `1` → success, `0` → ownership mismatch, `-1` → not found, `-2` → expired
-- Extend: `[1, newExpiresAtMs]` → success with authoritative server-time expiry, `0` → ownership mismatch, `-1` → not found, `-2` → expired
+**Why return codes**: Enables cheap internal condition tracking for telemetry without additional I/O. Public API simplifies to `{ ok: boolean }` for release/extend operations.
 
 ---
 
@@ -438,10 +319,12 @@ return { ok: success };
 
 ### Release Operation Requirements
 
-**MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via atomic Lua scripts. Return simplified `{ ok: boolean }` results. Track internal details cheaply when available for potential telemetry decorator consumption.
+- **LockId Validation**: MUST call `validateLockId(lockId)` and throw `LockError("InvalidArgument")` on malformed input
+- **MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via atomic Lua scripts. Return simplified `{ ok: boolean }` results. Track internal details cheaply when available for potential telemetry decorator consumption.
 
 ### Extend Operation Requirements
 
+- **LockId Validation**: MUST call `validateLockId(lockId)` and throw `LockError("InvalidArgument")` on malformed input
 - **MUST return authoritative expiresAtMs**: Computed from Redis server time authority (`redis.call('TIME')`) to ensure consistency and accurate heartbeat scheduling. No client-side approximation allowed (see ADR-010).
 - **MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via atomic Lua scripts. TTL semantics: replaces remaining TTL entirely (`now + ttlMs`).
 

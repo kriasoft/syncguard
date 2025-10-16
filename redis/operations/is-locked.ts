@@ -8,7 +8,7 @@ import {
   normalizeAndValidateKey,
 } from "../../common/backend.js";
 import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapRedisError } from "../errors.js";
+import { checkAborted, mapRedisError } from "../errors.js";
 import { IS_LOCKED_SCRIPT } from "../scripts.js";
 import type { RedisConfig } from "../types.js";
 
@@ -42,6 +42,9 @@ export function createIsLockedOperation(
 ) {
   return async (opts: KeyOp): Promise<boolean> => {
     try {
+      // Pre-dispatch abort check (ioredis does not accept AbortSignal)
+      checkAborted(opts.signal);
+
       const normalizedKey = normalizeAndValidateKey(opts.key);
 
       const REDIS_LIMIT_BYTES = 1000;

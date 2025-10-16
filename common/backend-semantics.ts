@@ -1,18 +1,31 @@
 // SPDX-FileCopyrightText: 2025-present Kriasoft
 // SPDX-License-Identifier: MIT
 
-// NOTE: Keep literals aligned with ReleaseResult/ExtendResult Reason types
+/**
+ * Symbol for attaching failure reason metadata to results without polluting public API.
+ * Enables telemetry decorator to track failure reasons without exposing them to users.
+ */
+export const FAILURE_REASON = Symbol("failureReason");
+
+/** Internal tracking for telemetry events (not in public result types) */
 export type MutationReason = "expired" | "not-found";
 
-// Internal state taxonomy: maps backend observations to user-facing reasons
-// DO NOT export in public API
+/**
+ * Internal state taxonomy mapping backend observations to user-facing reasons.
+ * DO NOT export in public API - used only by telemetry/mapping layers.
+ */
 export type MutationCondition =
   | "succeeded"
-  | "observable-expired" // Expiry observed deterministically before mutation
-  | "never-existed" // No record found
-  | "ownership-mismatch" // Record exists but lockId mismatch
-  | "cleaned-up-after-expiry" // Auto-removed due to expiry
-  | "ambiguous-unknown"; // Clock skew, snapshot race, stale index, etc.
+  /** Expiry observed deterministically before mutation */
+  | "observable-expired"
+  /** No record found in storage */
+  | "never-existed"
+  /** Record exists but lockId mismatch */
+  | "ownership-mismatch"
+  /** Auto-removed due to expiry */
+  | "cleaned-up-after-expiry"
+  /** Clock skew, snapshot race, stale index, etc. */
+  | "ambiguous-unknown";
 
 export type MutationResult =
   | { ok: true }
@@ -20,7 +33,7 @@ export type MutationResult =
 
 /**
  * Maps internal backend conditions to public API results.
- * Strategy: Collapse ambiguous states to "not-found" for safety.
+ * Conservative strategy: collapses ambiguous states to "not-found" for safety.
  */
 export function mapToMutationResult(cond: MutationCondition): MutationResult {
   switch (cond) {
@@ -28,7 +41,7 @@ export function mapToMutationResult(cond: MutationCondition): MutationResult {
       return { ok: true };
     case "observable-expired":
       return { ok: false, reason: "expired" };
-    // Conservative: all ambiguity → "not-found"
+    // All ambiguity → "not-found" (ownership-mismatch, cleaned-up, unknown)
     case "never-existed":
     case "ownership-mismatch":
     case "cleaned-up-after-expiry":
@@ -40,7 +53,7 @@ export function mapToMutationResult(cond: MutationCondition): MutationResult {
 
 /**
  * Decodes Redis Lua script return codes to MutationCondition.
- * Codes: 1=success, 0=ownership mismatch, -1=never existed, -2=expired
+ * @param code - Script result: 1=success, 0=ownership mismatch, -1=not found, -2=expired
  * @see redis/scripts.ts
  */
 export function mapRedisScriptResult(code: number): MutationCondition {
@@ -53,6 +66,7 @@ export function mapRedisScriptResult(code: number): MutationCondition {
 
 /**
  * Maps Firestore transaction/query observations to MutationCondition.
+ * @param conditions - Query result analysis
  * @param conditions.documentExists - !querySnapshot.empty
  * @param conditions.ownershipValid - data?.lockId === lockId
  * @param conditions.isLive - Computed via time authority + tolerance
@@ -73,7 +87,8 @@ export function mapFirestoreConditions(conditions: {
 }
 
 /**
- * Unified backend observation mapper (Redis codes or Firestore conditions).
+ * Unified backend observation mapper for Redis codes or Firestore conditions.
+ * @param observation - Redis script code or Firestore query analysis
  * @see specs/interface.md
  */
 export function mapBackendObservation(

@@ -4,6 +4,108 @@ This document contains architectural decisions made during the development of Sy
 
 **Date format:** All dates use `YYYY-MM` format, reflecting when the decision was accepted.
 
+---
+
+## Writing ADRs
+
+### Structure Template
+
+```markdown
+## ADR-NNN: Decision Title
+
+**Date:** YYYY-MM
+**Status:** Accepted
+
+**Context**: [Problem being solved, constraints, prior approach, why change was needed]
+
+**Decision**: [What was decided - high-level requirement or design choice]
+
+**Rationale**:
+
+[Structured explanation of WHY this decision was made:]
+
+- **Why [aspect]**: [Design reasoning, tradeoffs, impact]
+- **Alternatives considered and rejected**: [What was evaluated but not chosen, and why]
+
+**Consequences**:
+
+- **Breaking changes**: [If any, with justification]
+- **Impact areas**: [Where normative requirements are documented]
+- **Cross-references**: [Links to interface.md, backend specs with section anchors]
+```
+
+### What Belongs in ADRs vs Specifications
+
+| Content Type              | Belongs In                       | Example                              |
+| ------------------------- | -------------------------------- | ------------------------------------ |
+| MUST/SHOULD requirements  | interface.md, backend specs      | "MUST use 15-digit format"           |
+| Implementation algorithms | interface.md (with anchor links) | `makeStorageKey()` specification     |
+| Script signatures/formats | Backend specs (redis-backend.md) | Lua script KEYS/ARGV details         |
+| Type definitions          | interface.md, backend specs      | `type Fence = string`                |
+| **Decision rationale**    | **ADRs**                         | Why 15 digits vs 19 digits           |
+| **Design tradeoffs**      | **ADRs**                         | Precision safety vs capacity         |
+| **Alternatives rejected** | **ADRs**                         | Why not BigInt format                |
+| **Problem context**       | **ADRs**                         | What bug/limitation triggered change |
+
+### Writing Guidelines
+
+**DO:**
+
+- Explain **why** the decision was made and **what problem** it solves
+- Include **alternatives considered** with reasons for rejection
+- Reference normative specifications for implementation details
+- Use structured rationale with clear subsections (e.g., "Why X matters:", "Why Y was insufficient:")
+- Document tradeoffs explicitly
+- Keep consequences focused on impact areas and cross-references
+
+**DON'T:**
+
+- Repeat implementation details already in interface.md or backend specs
+- Include code snippets unless illustrating a concept (not normative)
+- Mix requirements (MUST/SHOULD) with rationale prose
+- Provide step-by-step implementation instructions
+- Duplicate algorithm specifications
+
+### Example: Good vs Bad ADR Content
+
+**❌ Bad (Too implementation-heavy):**
+
+```markdown
+**Decision**: Use 15-digit fence format.
+
+**Implementation**:
+
+- Redis: `string.format("%015d", redis.call('INCR', fenceKey))`
+- TypeScript: `String(n).padStart(15, '0')`
+- Overflow: throw when fence > 999999999999999
+```
+
+**✅ Good (Rationale-focused):**
+
+```markdown
+**Decision**: Use 15-digit fence format for guaranteed precision safety.
+
+**Rationale**:
+
+**Why 15 digits specifically:**
+
+- Stays within Lua's 53-bit IEEE 754 precision (2^53-1 ≈ 9.007e15)
+- Provides 10^15 capacity = ~31.7 years at 1M locks/sec
+- Zero rounding risk across all platforms
+
+**Alternatives considered:**
+
+- 19-digit format: Exceeds Lua precision, would break monotonicity
+- BigInt format: Not JSON-safe, poor cross-language support
+
+**Consequences**:
+
+- See interface.md §Fence Token Format for normative specification
+- See redis-backend.md for Lua implementation details
+```
+
+---
+
 ## ADR-003: Explicit Ownership Re-Verification in Mutations
 
 **Date:** 2025-09
@@ -37,44 +139,50 @@ if (data?.lockId !== lockId) {
 
 **Date:** 2025-09
 **Status:** Accepted
-**Context**: ADR-004-R1 claimed fences were "opaque" while mandating specific formatting and shipping comparison helpers. This contradiction increased API surface area and created potential for misuse. Additionally, the original 19-digit format created a **critical precision safety issue** in Redis Lua implementations: Lua numbers use IEEE 754 doubles (~53 bits mantissa precision ≈ 15-16 exact decimal digits), causing precision loss for fence values > 2^53-1 (~9e15), which breaks monotonicity guarantees.
 
-**Decision**: Fence tokens are **fixed-width decimal strings with lexicographic ordering**, using **15-digit format** for precision safety (reduced from original 19-digit proposal):
+**Context**: The original fence design claimed tokens were "opaque" while simultaneously mandating specific formatting and shipping comparison helper functions. This contradiction increased API surface area and created potential for misuse. More critically, the initial 19-digit format created a **precision safety issue** in Redis Lua implementations: Lua numbers use IEEE 754 doubles with ~53 bits of mantissa precision (≈15-16 exact decimal digits). Fence values exceeding 2^53-1 (~9e15) would suffer precision loss, breaking monotonicity guarantees—the core correctness property of fencing tokens.
 
-- **Public API**: `export type Fence = string` with explicit comparison rule
-- **Format**: 15-digit zero-padded decimal strings (e.g., "000000000000001")
-- **Comparison**: Direct string comparison (`fenceA > fenceB`) works correctly
-- **Backend Contract**: All backends return identical 15-digit zero-padded format
-- **Precision Safety**: 15-digit format guarantees full safety within Lua's 53-bit precision (2^53-1 ≈ 9.007e15; capacity up to 9.999e14)
-- **Practical Capacity**: 10^15 operations = ~31.7 years at 1M locks/sec (ample for production use)
-- **Overflow Handling**: Backends MUST parse returned fence values and throw `LockError("Internal")` if fence > `FENCE_THRESHOLDS.MAX`; backends MUST log warnings when fence > `FENCE_THRESHOLDS.WARN` for early operational signals via the shared `logFenceWarning()` utility in common. See `common/constants.ts` for canonical threshold values.
+**Decision**: Fence tokens are **fixed-width decimal strings with lexicographic ordering**, using a **15-digit format** for guaranteed precision safety.
 
 **Rationale**:
 
-- **Simplest possible API**: One comparison rule instead of helper functions and complex usage patterns
-- **Intuitive**: String comparison matches developer expectations for ordered values
-- **Eliminates contradictions**: No "opaque" claims while mandating specific formats
+**Why strings over numbers:**
+
+- **Simplest possible API**: Direct string comparison (`fenceA > fenceB`) eliminates need for helper functions
+- **Intuitive developer experience**: String comparison matches expectations for ordered values
 - **JSON-safe**: Strings serialize naturally without BigInt precision issues
-- **Cross-language compatible**: All languages can compare strings lexicographically
-- **Consistent format**: Fixed-width padding ensures reliable ordering across backends
-- **Precision safety**: 15-digit format eliminates ALL risk of Lua floating-point precision loss (stays well within 2^53-1 ≈ 9.007e15)
-- **Practical range**: 10^15 capacity provides ample production lifetime (31.7 years at 1M/sec)
-- **Correctness over optimization**: Aligns with "prioritize correctness and safety over micro-optimizations" principle
-- **Zero rounding risk**: Format guarantees exact integer representation in IEEE 754 doubles across all platforms
+- **Cross-language compatible**: All languages support lexicographic string comparison
+- **Eliminates contradictions**: No "opaque" claims while mandating specific formats
+
+**Why 15 digits specifically:**
+
+- **Precision safety**: Stays well within Lua's 53-bit IEEE 754 precision limit (2^53-1 ≈ 9.007e15)
+- **Practical capacity**: 10^15 operations = ~31.7 years at 1M locks/sec (ample for production use)
+- **Zero rounding risk**: Guarantees exact integer representation in IEEE 754 doubles across all platforms
+- **Correctness over optimization**: Aligns with project principle "prioritize correctness and safety over micro-optimizations"
+
+**Why fixed-width zero-padding:**
+
+- **Reliable ordering**: "000000000000002" > "000000000000001" without parsing
+- **Cross-backend consistency**: All backends produce identical formats for same fence value
+- **Deterministic behavior**: String comparison = chronological comparison, always
+
+**Alternatives considered and rejected:**
+
+- **BigInt format**: Not JSON-safe, poor cross-language support
+- **19-digit format**: Exceeds Lua precision limits, would break monotonicity
+- **Variable-width strings**: Lexicographic comparison fails ("9" > "10")
+- **Helper functions for comparison**: Unnecessary complexity when strings work natively
 
 **Consequences**:
 
-- Remove `compareFence()` and `isNewerFence()` from public API
-- Update backend specs: require identical 15-digit zero-padded format (reduced from original 19-digit design for guaranteed precision safety)
-- Update Lua scripts: implement `string.format("%015d", redis.call('INCR', fenceKey))` for 15-digit format
-- Update TypeScript helpers: implement `String(n).padStart(15, '0')` for 15-digit format
-- Remove `FenceOverflow` from public API; backends enforce overflow limit internally
-- Backends MUST parse and validate fence values, throwing `LockError("Internal")` when fence > `FENCE_THRESHOLDS.MAX`; backends MUST log warnings via `logFenceWarning()` when fence > `FENCE_THRESHOLDS.WARN`
-- Export canonical thresholds in `common/constants.ts` as `FENCE_THRESHOLDS.MAX` and `FENCE_THRESHOLDS.WARN`
-- Simplify documentation: one comparison rule replaces complex usage patterns
-- Backend implementations updated to use 15-digit format for complete precision safety
-- Cleanup operations MUST only delete lock data, never fence counters
-- **Breaking change**: Existing fence values incompatible (pre-1.0 acceptable)
+- **Breaking change**: Existing fence values incompatible (acceptable pre-1.0)
+- **Simpler public API**: Remove `compareFence()` and `isNewerFence()` helpers
+- **Simplified documentation**: One comparison rule replaces complex usage patterns
+- **Backend contract**: All backends must return identical 15-digit zero-padded format (see interface.md Fence Token Format for normative specification)
+- **Overflow handling**: Backends enforce `FENCE_THRESHOLDS.MAX` internally with warnings at `FENCE_THRESHOLDS.WARN` (see common/constants.ts)
+- **Cleanup safety**: Fence counters must never be deleted during cleanup operations (only lock data)
+- **Cross-references**: See interface.md for normative fence format requirements
 
 ## ADR-005: Unified Time Tolerance
 
@@ -251,37 +359,55 @@ interface LockBackend<C extends BackendCapabilities> {
 
 **Date:** 2025-10
 **Status:** Accepted
-**Context**: Originally, Redis acquire/extend Lua scripts returned only success indicators and fence tokens, forcing the TypeScript wrapper to approximate `expiresAtMs` using client-side `Date.now() + ttlMs`. This created two problems:
 
-1. **Time authority inconsistency**: Redis uses server time for all lock operations, but expiresAtMs was computed from client time, creating subtle drift
-2. **Heartbeat scheduling inaccuracy**: Callers scheduling extend operations based on approximate expiry could miss the window or extend too early
+**Context**: Originally, Redis acquire/extend Lua scripts returned only success indicators and fence tokens, forcing the TypeScript wrapper to approximate `expiresAtMs` using client-side calculations (`Date.now() + ttlMs`). This created two critical problems:
 
-**Decision**: All backend mutation operations (acquire, extend) MUST return authoritative `expiresAtMs` computed from the backend's designated time source:
+1. **Time authority inconsistency**: Redis uses server time for all lock operations and liveness checks, but expiresAtMs was computed from client time, creating subtle drift between authoritative state and reported expiry
+2. **Heartbeat scheduling inaccuracy**: Callers scheduling extend operations based on approximate expiry could miss the window (extending too late) or waste resources (extending unnecessarily early), especially with clock skew
 
-- **Redis**: Lua scripts compute and return `expiresAtMs` from Redis server time
-  - Acquire: `return {1, fence, expiresAtMs}`
-  - Extend: `return {1, newExpiresAtMs}`
-- **Firestore**: Operations compute and return `expiresAtMs` from client time
-- **No client-side approximation**: Backends MUST NOT use `Date.now() + ttlMs` to approximate expiry
+This violated the principle that timestamps should originate from the backend's designated time authority.
+
+**Decision**: All backend mutation operations (acquire, extend) MUST return authoritative `expiresAtMs` computed from the backend's designated time source—no client-side approximation permitted.
 
 **Rationale**:
 
-- **Time authority consistency**: All timestamps originate from the same authoritative source declared in `capabilities.timeAuthority`
-- **Accurate heartbeat scheduling**: Callers can schedule next extend operation based on true server-time expiry
-- **Eliminates approximation drift**: No accumulating errors from repeated client-side calculations
-- **Minimal overhead**: Adding one number to script return array (8 bytes) has negligible performance impact
-- **Composability**: Enables reliable auto-extend patterns based on precise timing
+**Why time authority consistency matters:**
+
+- **Single source of truth**: All timestamps (stored expiry, returned expiry, liveness checks) originate from the same authoritative clock
+- **Eliminates skew-induced bugs**: Client clock drift doesn't create divergence between "what the backend thinks" and "what the client reports"
+- **Predictable semantics**: `expiresAtMs` always reflects the backend's view of expiration, matching liveness predicate behavior
+
+**Why approximation is insufficient:**
+
+- **Accumulating drift**: Repeated client-side calculations compound errors over time
+- **Clock skew sensitivity**: Client/server clock differences make approximations unreliable
+- **Debugging complexity**: Discrepancies between reported and actual expiry complicate troubleshooting
+
+**Why heartbeat scheduling needs precision:**
+
+- **Auto-extend patterns**: Reliable heartbeating requires knowing exact server-time expiry
+- **Avoid premature extension**: Extending too early wastes backend round-trips
+- **Avoid missed windows**: Extending too late risks lock expiration and loss of ownership
+
+**Why minimal overhead:**
+
+- **Trivial cost**: Adding one number to return payload (8 bytes) has negligible impact
+- **Already available**: Backends computing expiry for storage can return it at no extra cost
+- **Composability win**: Enables higher-level patterns (auto-extend, adaptive heartbeats) without compromise
+
+**Alternatives considered and rejected:**
+
+- **Client-side approximation with tolerance buffer**: Still suffers from drift; band-aids the problem
+- **Separate getExpiry() operation**: Extra round-trip overhead; doesn't solve scheduling race
+- **Backend-neutral timestamps**: Impossible—time authority differs by backend design
 
 **Consequences**:
 
-- **Breaking change**: Redis scripts return different formats
-  - Acquire: `[1, fence]` → `[1, fence, expiresAtMs]`
-  - Extend: `1` → `[1, newExpiresAtMs]`
-- **TypeScript wrapper updates**: Parse and validate returned expiresAtMs
-- **Robustness checks**: Add validation for malformed script returns
-- **Specification updates**: Document new return formats in redis-backend.md
-- **Interface clarification**: Add note in interface.md Time Authority section about authoritative expiresAtMs requirement
-- **Test updates**: Update unit test mocks to return new format
+- **Time authority requirement**: Documented in interface.md Time Authority
+- **Backend compliance**: All backends must return authoritative expiresAtMs from mutations (see redis-backend.md and firestore-backend.md operation specs)
+- **TypeScript wrappers updated**: Parse and validate returned expiresAtMs with robustness checks
+- **Test coverage**: Unit tests verify no client-side approximation; integration tests verify heartbeat accuracy
+- **Cross-references**: See interface.md for normative authoritative expiresAtMs requirement
 
 ## ADR-011: Relaxed Atomicity for Diagnostic Lookup
 
@@ -351,45 +477,99 @@ This inconsistency created confusion and incompatible guarantees, despite the sp
 
 **Date:** 2025-10
 **Status:** Accepted
-**Context**: The Redis backend's reverse mapping logic contained a correctness bug when key truncation occurred. Per ADR-006, `makeStorageKey()` hashes and truncates the full prefixed key (`<prefix>:<normalizedKey>`) to a base64url string (22 characters) when the effective length exceeds the backend's budget (1000 bytes for Redis, after reserving 26 bytes). However, the acquire script stored the **original user key** in the reverse index (`{prefix}:id:{lockId}`), and the release/extend scripts reconstructed the main lock key as `{keyPrefix}:{key}` using that original value.
 
-This created a mismatch:
+**Context**: The Redis backend's reverse mapping logic contained a **correctness bug** when key truncation occurred. Per ADR-006, `makeStorageKey()` hashes and truncates long prefixed keys to a 22-character base64url string when they exceed the backend's storage limit. However, the acquire script stored the **original user key** in the reverse index, while release/extend scripts **reconstructed** the main lock key by concatenating `{prefix}:{originalKey}`.
 
-- **During acquire**: The main lock key is the truncated/hashed form (e.g., `syncguard:<22-char-hash>`)
-- **During release/extend**: Reconstruction uses the original key, resulting in a non-truncated key (e.g., `syncguard:<long-original-key>`), which doesn't match the stored lock
+This created a critical mismatch when truncation occurred:
 
-As a result, release/extend would fail to find the lock (returning "not found") or, in worst cases, target an unrelated key if collisions occur. This violated TOCTOU protection and ownership verification (ADR-003), breaking the core contract for mutating operations.
+- **During acquire**: Main lock key is truncated form (e.g., `syncguard:<22-char-hash>`)
+- **During release/extend**: Reconstruction uses original key (e.g., `syncguard:<long-original-key>`), which doesn't match
 
-Truncation triggers when `len(prefix + ':' + userKey.encode('utf-8')) + 26 > 1000`, or roughly when `len(prefix) > 461` bytes with a 512-byte user key. While uncommon with the default prefix ("syncguard"), it's possible with custom namespaces (e.g., app-specific long prefixes), making this a latent correctness issue.
+**Result**: Release/extend operations would fail to find the lock (returning "not found") or, in worst cases, target an unrelated key. This violated TOCTOU protection and ownership verification (ADR-003), breaking the core correctness guarantee for mutations.
 
-**Decision**: The reverse index MUST store the full computed storage key (post-truncation), not the original user key:
+Truncation triggers when `len(prefix + ':' + userKey) + 26 > 1000` bytes (roughly when `len(prefix) > 461` bytes with a 512-byte user key). While uncommon with the default prefix ("syncguard"), it's possible with custom namespaces, making this a latent safety issue.
 
-- **Acquire script**: Store full `lockKey` in index: `redis.call('SET', lockIdKey, storageKey, 'PX', ttlMs)` where `storageKey = ARGV[4]` is the full lockKey passed from TypeScript
-- **Release/extend/lookup scripts**: Retrieve full `lockKey` directly from index: `local lockKey = redis.call('GET', lockIdKey)` (no reconstruction)
-- **Remove keyPrefix parameter**: Release, extend, and lookup-by-lockId scripts no longer need `KEYS[2] = keyPrefix` since reconstruction is eliminated
-- **Script simplification**: Remove all prefix handling logic (`if string.sub(keyPrefix, -1) == ":" then ...`)
+**Decision**: The reverse index MUST store the full computed storage key (post-truncation), not the original user key. Eliminate key reconstruction entirely.
 
 **Rationale**:
 
-- **Eliminates reconstruction mismatch**: Storing the post-truncation key ensures release/extend always target the correct lock
-- **Ensures consistency under truncation**: Closes the safety hole without API changes
-- **Improves composability**: Robust to any valid config (long prefixes, max keys)
-- **Enhances testability**: Unit tests can now simulate truncation (long prefix + max key) to verify release/extend
-- **Negligible overhead**: Redis values handle 1000-byte strings efficiently; no performance impact
-- **Surgical fix**: Minimal changes to scripts and TypeScript wrappers; no public API changes
+**Why reconstruction was fundamentally broken:**
+
+- **Mismatch under truncation**: Original key reconstruction produces different result than truncated key
+- **Silent failure**: Bug only manifests with long prefixes/keys, making it hard to catch in typical testing
+- **Violates TOCTOU protection**: Operations target wrong key, bypassing atomic verification guarantees
+- **Composability failure**: Valid configurations (long prefix + max key) produced incorrect behavior
+
+**Why storing full storage key fixes it:**
+
+- **Eliminates reconstruction**: No string concatenation, no mismatch possible
+- **Consistency guarantee**: Index always returns exactly the key used during acquire
+- **Works under all conditions**: Truncated or not, index lookup returns correct target
+- **Defense-in-depth**: Even if truncation logic changes, reverse index remains correct
+
+**Why minimal overhead:**
+
+- **Storage cost**: Negligible—Redis values handle 1000-byte strings efficiently
+- **Performance cost**: None—GET operation works identically regardless of value length
+- **Complexity reduction**: Removing reconstruction logic simplifies scripts
+
+**Why testability matters:**
+
+- **Previously untestable**: Hard to simulate truncation without long prefixes in tests
+- **Now verifiable**: Unit tests can use long prefix + max key to exercise truncation path
+- **Regression prevention**: Tests ensure future changes don't reintroduce bug
+
+**Alternatives considered and rejected:**
+
+- **Fix reconstruction logic**: Still fragile; any future truncation changes risk re-breaking
+- **Disable truncation for reverse index**: Doesn't solve mismatch; creates inconsistent key handling
+- **Separate truncation for index**: Complexity explosion; hard to reason about correctness
 
 **Consequences**:
 
-- **Script updates**:
-  - `ACQUIRE_SCRIPT`: Changed ARGV[4] from `key` to `storageKey`; stores full lockKey in index
-  - `RELEASE_SCRIPT`: Changed KEYS from `[lockIdKey, keyPrefix]` to `[lockIdKey]`; retrieves lockKey directly
-  - `EXTEND_SCRIPT`: Changed KEYS from `[lockIdKey, keyPrefix]` to `[lockIdKey]`; retrieves lockKey directly; re-stores lockKey in index
-  - `LOOKUP_BY_LOCKID_SCRIPT`: Changed KEYS from `[lockIdKey, keyPrefix]` to `[lockIdKey]`; retrieves lockKey directly
-- **TypeScript updates**:
-  - `acquire.ts`: Pass `lockKey` (not `normalizedKey`) as ARGV[4]
-  - `release.ts`: Remove `config.keyPrefix` from script call; change numKeys from 2 to 1
-  - `extend.ts`: Remove `config.keyPrefix` from script call; change numKeys from 2 to 1
-  - `lookup.ts`: Remove `config.keyPrefix` from lookup-by-lockId script call; change numKeys from 2 to 1
-- **Interface updates**: Update cached script signatures to remove `keyPrefix` parameter
-- **Test coverage**: Added `test/unit/redis-truncation-correctness.test.ts` to verify fix handles truncation correctly
-- **No data migration**: Breaking change acceptable in pre-1.0 (existing locks in production would need to expire or be manually cleaned up)
+- **Breaking change**: Reverse index format changed (acceptable pre-1.0)
+- **Script simplification**: Remove all prefix reconstruction logic and `keyPrefix` parameter
+- **Redis implementation updated**: Acquire stores full lockKey; release/extend/lookup retrieve it directly (see redis-backend.md for script specifications)
+- **Test coverage**: Added `test/unit/redis-truncation-correctness.test.ts` to verify truncation handling
+- **No data migration**: Existing locks in production expire naturally or need manual cleanup
+- **Cross-references**: See interface.md Standardized Storage Key Generation for truncation algorithm
+
+## ADR-014: Defensive Detection of Duplicate LockId Documents (Firestore)
+
+**Date:** 2025-10
+**Status:** Accepted
+**Context**: Firestore lacks database-level unique indexes on fields. The library queries locks by lockId using `where("lockId", "==", lockId).limit(1)`, relying on correct implementation to prevent duplicate documents with the same lockId. However, in real-world operations, bugs, race conditions during migrations, or manual interventions could create duplicates. If this occurs:
+
+- **Query ambiguity**: `.limit(1)` returns an arbitrary document when duplicates exist
+- **Ownership verification helps but isn't sufficient**: ADR-003's explicit verification prevents wrong-lock mutations, but doesn't address the underlying data inconsistency
+- **Observability blind spot**: Duplicates remain invisible without defensive checks, complicating debugging and cleanup
+- **State drift accumulation**: Without detection, duplicate documents could accumulate over time
+
+While this shouldn't happen in normal operation, defensive programming principles require handling operational foot-guns.
+
+**Decision**: Add defensive SHOULD requirement for Firestore operations that query by lockId:
+
+- **Query adjustment**: Remove `.limit(1)` from lockId queries to enable duplicate detection
+- **Detection**: When transaction reads return `querySnapshot.docs.length > 1`, treat as internal inconsistency
+- **Telemetry**: Log warning with key and lockId context (not error, since this is defensive)
+- **Safe cleanup**: MAY delete expired duplicate documents within the same transaction (NEVER delete live locks)
+- **Fail-safe mutation**: When duplicates detected and any are live, operations SHOULD return `{ ok: false }` to avoid mutating ambiguous state
+- **Scope**: Applies to release, extend, and lookup operations (acquire uses direct document access by key)
+- **Performance note**: Removing `.limit(1)` has negligible impact since Firestore uses indexed queries and duplicates shouldn't exist in normal operation
+
+**Rationale**:
+
+- **Defense-in-depth**: Catches data inconsistencies that shouldn't exist but might occur in production
+- **Operational visibility**: Telemetry provides early warning for investigation/cleanup
+- **Safety first**: Failing mutations on ambiguous state prevents cascading errors
+- **No false positives**: Detection only triggers on genuine duplicates (legitimate case: zero or one document)
+- **Minimal performance impact**: Removing `.limit(1)` adds negligible overhead since indexed queries are fast and duplicates are rare
+- **Composable cleanup**: Optional expired-document deletion reduces state drift without risking live locks
+- **Correct detection semantics**: `.limit(1)` would prevent detection by capping results at 1 document
+
+**Consequences**:
+
+- **Specification updates**: Add section in `firestore-backend.md` with SHOULD requirements
+- **Implementation**: See JSDoc comments in `firestore/operations/*.ts` for detection patterns
+- **Testing**: Integration tests SHOULD verify duplicate handling
+- **Backward compatibility**: SHOULD requirement allows gradual adoption

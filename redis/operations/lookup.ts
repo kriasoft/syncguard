@@ -13,7 +13,7 @@ import {
   validateLockId,
 } from "../../common/backend.js";
 import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
-import { mapRedisError } from "../errors.js";
+import { checkAborted, mapRedisError } from "../errors.js";
 import { LOOKUP_BY_KEY_SCRIPT, LOOKUP_BY_LOCKID_SCRIPT } from "../scripts.js";
 import type { RedisCapabilities, RedisConfig } from "../types.js";
 
@@ -57,6 +57,9 @@ export function createLookupOperation(
     opts: KeyLookup | OwnershipLookup,
   ): Promise<LockInfo<RedisCapabilities> | null> => {
     try {
+      // Pre-dispatch abort check (ioredis does not accept AbortSignal)
+      checkAborted(opts.signal);
+
       let scriptResult: string | null;
 
       const REDIS_LIMIT_BYTES = 1000;

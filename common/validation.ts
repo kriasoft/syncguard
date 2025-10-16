@@ -5,10 +5,14 @@ import { MAX_KEY_LENGTH_BYTES } from "./constants.js";
 import { LockError } from "./errors.js";
 
 /**
+ * Validates lock ID format (22 base64url characters from 16 bytes CSPRNG).
  * Client-side validation for immediate feedback before backend operations.
  * Prevents round-trip latency for malformed inputs.
  *
- * @throws {LockError} InvalidArgument for format violations
+ * @param lockId - Lock identifier to validate
+ * @throws {LockError} InvalidArgument for format violations (empty, wrong length, invalid characters)
+ * @see specs/interface.md#acquire-operation-requirements - Normative lockId validation requirement
+ * @see specs/interface.md#security-considerations - Lock ID security and CSPRNG requirements
  */
 export function validateLockId(lockId: string): void {
   if (
@@ -27,9 +31,11 @@ export function validateLockId(lockId: string): void {
  * Normalizes key to Unicode NFC and validates length constraints.
  * Prevents encoding-based key collisions (e.g., "café" vs "cafe\u0301").
  *
+ * @param key - User-provided lock key
  * @returns Normalized key safe for backend storage
- * @throws {LockError} InvalidArgument for empty/oversized keys
- * @see common/constants.ts for MAX_KEY_LENGTH_BYTES
+ * @throws {LockError} InvalidArgument for empty/oversized keys (max 512 bytes after NFC normalization)
+ * @see specs/interface.md#core-constants - Normative MAX_KEY_LENGTH_BYTES requirement
+ * @see common/constants.ts - MAX_KEY_LENGTH_BYTES constant definition
  */
 export function normalizeAndValidateKey(key: string): string {
   if (typeof key !== "string") {
