@@ -14,6 +14,10 @@ jobs:
   integration:
     name: Integration & Performance Tests
     runs-on: ubuntu-latest
+    env:
+      # Make explicit for tests that honor env vars
+      REDIS_URL: redis://127.0.0.1:6379
+      POSTGRES_URL: postgres://postgres@127.0.0.1:5432/syncguard
 
     services:
       redis:
@@ -22,6 +26,20 @@ jobs:
           - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: syncguard
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d syncguard"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -39,6 +57,12 @@ jobs:
 
       # Launch Firestore emulator
       - run: bun firebase emulators:start --only firestore & echo $! > emulator.pid
+
+      # Ensure services are reachable (ports open) before tests
+      - name: Wait for Redis (6379)
+        run: for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
+      - name: Wait for Postgres (5432)
+        run: for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
 
       - run: bun run test:integration
       - run: bun run test:performance

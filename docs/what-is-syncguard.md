@@ -1,6 +1,6 @@
 # What is SyncGuard?
 
-SyncGuard is a TypeScript distributed lock library that prevents race conditions across microservices. It provides a simple API for coordinating access to shared resources using Redis or Firestore as the backend.
+SyncGuard is a TypeScript distributed lock library that prevents race conditions across microservices. It provides a simple API for coordinating access to shared resources using Redis, PostgreSQL, or Firestore as the backend.
 
 ## The Problem: Race Conditions in Distributed Systems
 
@@ -53,7 +53,7 @@ The first process acquires the lock. Others wait or retry. Your customer gets ch
 - 🔢 **Fencing tokens** — Monotonic counters prevent stale lock holders from corrupting data (see [Fencing Tokens](/fencing))
 - 🧹 **Automatic cleanup** — TTL-based expiration means locks release even if your process crashes
 - 🔐 **Ownership tracking** — Each lock gets a unique ID; only the owner can release or extend it
-- 🔄 **Backend flexibility** — Use Redis for speed or Firestore for serverless—same API, same guarantees
+- 🔄 **Backend flexibility** — Use Redis for speed, PostgreSQL for relational database infrastructure, or Firestore for serverless—same API, same guarantees
 - 🔁 **Smart retries** — Exponential backoff with jitter handles contention automatically
 - 💙 **TypeScript-first** — Compile-time type safety with capability inference
 
@@ -138,7 +138,7 @@ Don't use locks for every API request or database query. Network round-trip per 
 3. **Release**: Free the lock for others (or let TTL expire automatically)
 
 ::: info Atomic Operations Guarantee
-SyncGuard uses atomic operations (Lua scripts for Redis, transactions for Firestore) to ensure:
+SyncGuard uses atomic operations (Lua scripts for Redis, transactions for PostgreSQL and Firestore) to ensure:
 
 - No race window between checking and acquiring
 - Ownership verified before release/extend (see ADR-003)

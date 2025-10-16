@@ -11,6 +11,9 @@
 ## Commands
 
 ```bash
+bun run redis              # Launch Redis via Docker
+run run firestore          # Launch Firestore emulator
+
 # Development (fast)
 bun run test:unit          # Unit tests only (~100ms)
 bun run test:watch         # Watch mode
@@ -19,10 +22,6 @@ bun run test:watch         # Watch mode
 bun run test:integration   # Real Redis required
 bun run test:performance   # Benchmarks
 bun run test:all           # Everything
-
-# Redis management
-bun run redis:start        # Start Docker Redis
-bun run redis:stop         # Stop Docker Redis
 ```
 
 ## Test Structure
@@ -34,24 +33,11 @@ test/
 └── performance/    # Latency, throughput, optimization
 ```
 
-## Redis Setup
-
-**Docker (recommended):**
+## Connection Settings
 
 ```bash
-bun run redis:start
-```
-
-**Local Redis:**
-
-```bash
-brew install redis && redis-server
-```
-
-**Remote Redis:**
-
-```bash
-export REDIS_URL="redis://host:6379"
+POSTGRES_URL=postgres://postgres@localhost:5432/syncguard
+REDIS_URL=redis://host:6379
 ```
 
 ## When to Use Each Test Type
@@ -66,8 +52,8 @@ export REDIS_URL="redis://host:6379"
 
 ```bash
 redis-cli ping                               # Test connection
-docker-compose -f docker-compose.test.yml ps # Check container
-bun run redis:logs                           # View logs
+docker ps                                    # Check container
+docker logs redis-test                       # View logs
 ```
 
 **Test debugging:**

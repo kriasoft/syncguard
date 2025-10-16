@@ -6,26 +6,30 @@ Get your first distributed lock running in under 5 minutes.
 
 ::: code-group
 
-```bash [Firestore]
-npm install syncguard @google-cloud/firestore
-```
-
 ```bash [Redis]
 npm install syncguard ioredis
+```
+
+```bash [PostgreSQL]
+npm install syncguard postgres
+```
+
+```bash [Firestore]
+npm install syncguard @google-cloud/firestore
 ```
 
 :::
 
 Install only the backend you need. Peer dependencies are optional.
 
-## Quick Start (Firestore)
+## Quick Start (Redis)
 
 ```typescript
-import { createLock } from "syncguard/firestore";
-import { Firestore } from "@google-cloud/firestore";
+import { createLock } from "syncguard/redis";
+import Redis from "ioredis";
 
-const db = new Firestore();
-const lock = createLock(db);
+const redis = new Redis();
+const lock = createLock(redis);
 
 // Prevent duplicate payment processing
 await lock(
@@ -40,18 +44,14 @@ await lock(
 );
 ```
 
-::: tip Firestore Index Required
-For optimal performance, create a single-field ascending index on the `lockId` field in your `locks` collection. Firestore typically auto-creates this for equality queries, but verify in production.
-:::
-
-## Quick Start (Redis)
+## Quick Start (PostgreSQL)
 
 ```typescript
-import { createLock } from "syncguard/redis";
-import Redis from "ioredis";
+import { createLock } from "syncguard/postgres";
+import postgres from "postgres";
 
-const redis = new Redis();
-const lock = createLock(redis);
+const sql = postgres("postgresql://localhost:5432/myapp");
+const lock = await createLock(sql);
 
 await lock(
   async () => {
@@ -60,6 +60,31 @@ await lock(
   { key: "resource:123" },
 );
 ```
+
+::: tip PostgreSQL Indexes Required
+For optimal performance, create indexes on the `lock_id` and `expires_at_ms` fields. See `postgres/schema.sql` for complete table and index definitions.
+:::
+
+## Quick Start (Firestore)
+
+```typescript
+import { createLock } from "syncguard/firestore";
+import { Firestore } from "@google-cloud/firestore";
+
+const db = new Firestore();
+const lock = createLock(db);
+
+await lock(
+  async () => {
+    // Your critical section
+  },
+  { key: "resource:123" },
+);
+```
+
+::: tip Firestore Index Required
+For optimal performance, create a single-field ascending index on the `lockId` field in your `locks` collection. Firestore typically auto-creates this for equality queries, but verify in production.
+:::
 
 That's it. The `lock()` function handles acquisition, retries, execution, and release automatically.
 
@@ -86,16 +111,23 @@ Backend-specific config (collection names, key prefixes):
 
 ::: code-group
 
+```typescript [Redis]
+const lock = createLock(redis, {
+  keyPrefix: "my-app", // Default: "syncguard"
+});
+```
+
+```typescript [PostgreSQL]
+const lock = await createLock(sql, {
+  tableName: "app_locks", // Default: "syncguard_locks"
+  fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
+});
+```
+
 ```typescript [Firestore]
 const lock = createLock(db, {
   collection: "app_locks", // Default: "locks"
   fenceCollection: "app_fences", // Default: "fence_counters"
-});
-```
-
-```typescript [Redis]
-const lock = createLock(redis, {
-  keyPrefix: "my-app", // Default: "syncguard"
 });
 ```
 

@@ -69,6 +69,7 @@ export default defineConfig({
         text: "Backends",
         items: [
           { text: "Redis", link: "/redis" },
+          { text: "PostgreSQL", link: "/postgres" },
           { text: "Firestore", link: "/firestore" },
         ],
       },

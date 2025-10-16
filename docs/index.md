@@ -5,7 +5,7 @@ layout: home
 hero:
   name: "SyncGuard"
   text: "Distributed locks that feel like local locks"
-  tagline: "One `await lock()` call to prevent race conditions across your services. TypeScript library with fencing tokens, auto-cleanup, and Redis/Firestore support."
+  tagline: "One `await lock()` call to prevent race conditions across your services. TypeScript library with fencing tokens, auto-cleanup, and Redis/Firestore/PostgreSQL support."
   actions:
     - theme: brand
       text: What is SyncGuard?
@@ -23,7 +23,7 @@ features:
     details: TTL-based expiration means locks automatically release. No manual cleanup, no orphaned locks, no midnight pages about stuck resources.
   - title: Backend Flexibility
     icon: 🔄
-    details: Switch between Redis and Firestore without changing your code. Same API, same guarantees, different infrastructure.
+    details: Switch between Redis, PostgreSQL, and Firestore without changing your code. Same API, same guarantees, different infrastructure.
   - title: Built for TypeScript
     icon: 💙
     details: Full type safety with discriminated unions and capability inference. Know at compile-time what guarantees your backend provides.

@@ -13,7 +13,7 @@ This specification uses a **normative vs rationale** pattern:
 
 **Backend Delta Pattern:**
 
-Backend-specific specifications (redis-backend.md, firestore-backend.md) extend this common interface specification. To enhance machine-parseability and prevent agent drift:
+Backend-specific specifications (redis-backend.md, postgres-backend.md, firestore-backend.md) extend this common interface specification. To enhance machine-parseability and prevent agent drift:
 
 - Backend specs MUST restate key inherited requirements (e.g., authoritative expiresAtMs) in their operation requirement sections
 - Restatements provide explicit MUST/SHOULD bullets in normative tables for agent parsing
@@ -374,7 +374,7 @@ export type ExtendResult =
   | { ok: false }; // lock was absent (expired or never existed)
 ```
 
-**Fence Token Compile-Time Guarantee**: Fence tokens are required in the type system when `backend.capabilities.supportsFencing === true`. All v1 backends (Redis, Firestore) provide fencing tokens. Non-fencing backends are out of scope for v1.
+**Fence Token Compile-Time Guarantee**: Fence tokens are required in the type system when `backend.capabilities.supportsFencing === true`. All v1 backends (Redis, PostgreSQL, Firestore) provide fencing tokens. Non-fencing backends are out of scope for v1.
 
 **Time fields:** All core types use `expiresAtMs` / `acquiredAtMs` (Unix ms) for consistency and wire/JSON optimization. Helper utilities MAY provide Date conversion when convenient for consumers.
 
@@ -1228,7 +1228,7 @@ When implementing a new backend, ensure:
 
 **Fencing Tokens:**
 
-- All v1 backends (Redis, Firestore) MUST always include monotonic `fence` tokens in acquire results
+- All v1 backends (Redis, PostgreSQL, Firestore) MUST always include monotonic `fence` tokens in acquire results
 - Fencing tokens provide protection against stale owner problems
 - Applications SHOULD validate fence tokens when accessing guarded resources
 - Higher fence numbers indicate more recent acquisitions

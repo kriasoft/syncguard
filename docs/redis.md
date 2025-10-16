@@ -95,7 +95,7 @@ Redis uses server time (`TIME` command) for all expiration checks, eliminating m
 const result = await backend.acquire({ key: "task:123", ttlMs: 60000 });
 ```
 
-**Unified Tolerance** (ADR-005): All backends use a fixed 1000ms tolerance for predictable, consistent behavior across Redis and Firestore. This tolerance is internal and not user-configurable.
+**Unified Tolerance** (ADR-005): All backends use a fixed 1000ms tolerance for predictable, consistent behavior across Redis, PostgreSQL, and Firestore. This tolerance is internal and not user-configurable.
 
 ### Atomic Operations via Lua Scripts
 

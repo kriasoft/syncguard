@@ -53,7 +53,7 @@ See [Core Concepts](/core-concepts#retry-strategy) for retry configuration detai
 
 ---
 
-### `createLock()` <Badge type="info" text="syncguard/redis" /> <Badge type="info" text="syncguard/firestore" />
+### `createLock()` <Badge type="info" text="syncguard/redis" /> <Badge type="info" text="syncguard/postgres" /> <Badge type="info" text="syncguard/firestore" />
 
 Factory for backend-specific auto-managed lock functions.
 
@@ -66,6 +66,19 @@ import Redis from "ioredis";
 const redis = new Redis();
 const lock = createLock(redis, {
   keyPrefix: "my-app", // Default: "syncguard"
+});
+
+await lock(workFn, { key: "resource:123" });
+```
+
+```typescript [PostgreSQL]
+import { createLock } from "syncguard/postgres";
+import postgres from "postgres";
+
+const sql = postgres("postgresql://localhost:5432/myapp");
+const lock = await createLock(sql, {
+  tableName: "app_locks", // Default: "syncguard_locks"
+  fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
 });
 
 await lock(workFn, { key: "resource:123" });
@@ -367,6 +380,7 @@ console.log(backend.capabilities.timeAuthority); // "server" (Redis uses server 
 ```
 
 **Redis:** `{ supportsFencing: true, timeAuthority: "server" }`
+**PostgreSQL:** `{ supportsFencing: true, timeAuthority: "server" }`
 **Firestore:** `{ supportsFencing: true, timeAuthority: "client" }`
 
 ---
@@ -648,6 +662,30 @@ const backend = createFirestoreBackend(db, {
 ```
 
 See [Firestore Backend](/firestore#backend-configuration) for details.
+
+---
+
+#### `PostgresBackendOptions` <Badge type="info" text="syncguard/postgres" />
+
+```typescript
+interface PostgresBackendOptions {
+  tableName?: string; // Default: "syncguard_locks"
+  fenceTableName?: string; // Default: "syncguard_fence_counters"
+  cleanupInIsLocked?: boolean; // Default: false
+}
+```
+
+**Usage:**
+
+```typescript
+const backend = createPostgresBackend(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+  cleanupInIsLocked: true, // Optional cleanup in isLocked()
+});
+```
+
+See [PostgreSQL Backend](/postgres#backend-configuration) for details.
 
 ---
 
@@ -964,7 +1002,7 @@ function processWithAnyBackend<C extends BackendCapabilities>(
 }
 ```
 
-**Note:** Most application code uses typed backends (Redis/Firestore) and doesn't need `hasFence()` since TypeScript knows `fence` exists at compile-time.
+**Note:** Most application code uses typed backends (Redis/PostgreSQL/Firestore) and doesn't need `hasFence()` since TypeScript knows `fence` exists at compile-time.
 
 ---
 
@@ -1091,5 +1129,5 @@ console.log(MAX_KEY_LENGTH_BYTES); // 512
 ```
 
 ::: info Internal Constant
-`TIME_TOLERANCE_MS = 1000` is an internal constant used by all backends for consistent liveness checks. It's not exported or user-configurable (ADR-005). Both Redis and Firestore use the same 1000ms tolerance automatically.
+`TIME_TOLERANCE_MS = 1000` is an internal constant used by all backends for consistent liveness checks. It's not exported or user-configurable (ADR-005). Redis, PostgreSQL, and Firestore use the same 1000ms tolerance automatically.
 :::

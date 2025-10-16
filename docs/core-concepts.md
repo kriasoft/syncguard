@@ -73,6 +73,7 @@ Math.random().toString(); // Random keys defeat the purpose
 Backend prefixes prevent cross-app collisions:
 
 - Redis: `"syncguard:payment:123"`
+- PostgreSQL: row in `"syncguard_locks"` table
 - Firestore: document ID in `"locks"` collection
   :::
 
