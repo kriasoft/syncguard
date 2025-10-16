@@ -6,6 +6,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 - **Bun**: Install from [bun.sh](https://bun.sh)
 - **Docker** (for integration tests): Any recent version
+- **PostgreSQL** (for integration tests): 14+ running on localhost:5432
 - **Node.js**: 18+ (Bun handles this, but good to have)
 
 ## Quick Start
@@ -53,15 +54,16 @@ Thanks for your interest in contributing! This guide will help you get started.
 ### Testing Strategy
 
 - **Unit tests**: `bun run test:unit` - Fast, mocked dependencies
-- **Integration tests**: `bun run test:integration` - Requires Redis
+- **Integration tests**: `bun run test:integration` - Requires Redis, PostgreSQL, and Firestore
 - **Performance tests**: `bun run test:performance` - Optional benchmarks
 
 To run integration tests locally:
 
 ```bash
-# Start backends (in separate terminals)
+# Start backends (in separate terminals or as background services)
 bun run redis       # Redis on localhost:6379
 bun run firestore   # Firestore emulator on localhost:8080
+# PostgreSQL on localhost:5432 (install separately)
 
 # Run integration tests
 bun run test:integration
@@ -108,6 +110,7 @@ bun run test:integration
 # Source files at project root (not in src/)
 common/             # Core interfaces and utilities
 firestore/          # Firestore backend implementation
+postgres/           # PostgreSQL backend implementation
 redis/              # Redis backend implementation
 index.ts            # Main exports
 
@@ -123,7 +126,7 @@ specs/              # Technical specifications and ADRs
 ## Types of Contributions
 
 - **Bug fixes**: Always welcome (include test case demonstrating the bug)
-- **New backends**: Follow `specs/interface.md` and existing patterns (Redis/Firestore)
+- **New backends**: Follow `specs/interface.md` and existing patterns (Redis/PostgreSQL/Firestore)
 - **Performance improvements**: Include benchmarks showing improvement
 - **Documentation**: Especially examples, edge cases, and troubleshooting
 - **Tests**: Better coverage is always good
@@ -155,7 +158,7 @@ If contributing a new backend, ensure:
 - [ ] Implements TOCTOU protection for release/extend (ADR-003)
 - [ ] Explicit ownership verification after reverse mapping
 - [ ] Comprehensive unit and integration tests
-- [ ] Backend-specific spec document (follow specs/redis-backend.md or specs/firestore-backend.md pattern)
+- [ ] Backend-specific spec document (follow specs/redis-backend.md, specs/postgres-backend.md, or specs/firestore-backend.md pattern)
 
 ## Getting Help
 

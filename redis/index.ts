@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import type { Redis } from "ioredis";
-import { createAutoLock } from "../common/backend.js";
+import { lock } from "../common/auto-lock.js";
+import type { AcquisitionOptions, LockConfig } from "../common/types.js";
 import { createRedisBackend } from "./backend.js";
 import type { RedisBackendOptions } from "./types.js";
 
@@ -14,7 +15,12 @@ import type { RedisBackendOptions } from "./types.js";
  */
 export function createLock(redis: Redis, options: RedisBackendOptions = {}) {
   const backend = createRedisBackend(redis, options);
-  return createAutoLock(backend);
+  return <T>(
+    fn: () => Promise<T> | T,
+    config: LockConfig & { acquisition?: AcquisitionOptions },
+  ): Promise<T> => {
+    return lock(backend, fn, config);
+  };
 }
 
 // Re-exports for custom backend implementations

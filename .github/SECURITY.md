@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 2.x     | :white_check_mark: |
+| < 2.0   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -71,4 +71,4 @@ We appreciate security researchers who help keep SyncGuard secure. If you report
 
 ---
 
-**This policy may be updated as the project evolves. Last updated: 2025-01-14**
+**This policy may be updated as the project evolves. Last updated: 2025-10-16**

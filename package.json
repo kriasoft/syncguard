@@ -1,6 +1,6 @@
 {
   "name": "syncguard",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Functional TypeScript library for distributed locking across microservices. Prevents race conditions with Redis, PostgreSQL, Firestore, and custom backends. Features automatic lock management, timeout handling, and extensible architecture.",
   "keywords": [
     "atomic",

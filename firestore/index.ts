@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import type { Firestore } from "@google-cloud/firestore";
-import { createAutoLock } from "../common/backend.js";
+import { lock } from "../common/auto-lock.js";
+import type { AcquisitionOptions, LockConfig } from "../common/types.js";
 import { createFirestoreBackend } from "./backend.js";
 import type { FirestoreBackendOptions } from "./types.js";
 
@@ -17,7 +18,12 @@ export function createLock(
   options: FirestoreBackendOptions = {},
 ) {
   const backend = createFirestoreBackend(db, options);
-  return createAutoLock(backend);
+  return <T>(
+    fn: () => Promise<T> | T,
+    config: LockConfig & { acquisition?: AcquisitionOptions },
+  ): Promise<T> => {
+    return lock(backend, fn, config);
+  };
 }
 
 // Re-exports for custom backend implementations
