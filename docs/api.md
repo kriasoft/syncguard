@@ -72,11 +72,19 @@ await lock(workFn, { key: "resource:123" });
 ```
 
 ```typescript [PostgreSQL]
-import { createLock } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 import postgres from "postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const lock = await createLock(sql, {
+
+// Setup schema (once, during initialization)
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
+
+// Create lock function (synchronous)
+const lock = createLock(sql, {
   tableName: "app_locks", // Default: "syncguard_locks"
   fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
 });
@@ -678,6 +686,15 @@ interface PostgresBackendOptions {
 **Usage:**
 
 ```typescript
+import { setupSchema, createPostgresBackend } from "syncguard/postgres";
+
+// Setup schema (once)
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
+
+// Create backend (synchronous)
 const backend = createPostgresBackend(sql, {
   tableName: "app_locks",
   fenceTableName: "app_fence_counters",

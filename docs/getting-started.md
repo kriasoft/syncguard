@@ -47,11 +47,16 @@ await lock(
 ## Quick Start (PostgreSQL)
 
 ```typescript
-import { createLock } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 import postgres from "postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const lock = await createLock(sql);
+
+// Setup schema (once, during initialization)
+await setupSchema(sql);
+
+// Create lock function (synchronous)
+const lock = createLock(sql);
 
 await lock(
   async () => {
@@ -61,8 +66,8 @@ await lock(
 );
 ```
 
-::: tip PostgreSQL Indexes Required
-For optimal performance, create indexes on the `lock_id` and `expires_at_ms` fields. See `postgres/schema.sql` for complete table and index definitions.
+::: tip PostgreSQL Schema Setup
+Call `setupSchema()` once during application initialization to create required tables and indexes. This is an idempotent operation safe to call multiple times. See `postgres/schema.sql` for complete table and index definitions.
 :::
 
 ## Quick Start (Firestore)
@@ -118,7 +123,14 @@ const lock = createLock(redis, {
 ```
 
 ```typescript [PostgreSQL]
-const lock = await createLock(sql, {
+// Setup schema with custom table names
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
+
+// Create lock with matching config
+const lock = createLock(sql, {
   tableName: "app_locks", // Default: "syncguard_locks"
   fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
 });

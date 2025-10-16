@@ -100,27 +100,29 @@ docker run -d \
 
 ### Schema Setup
 
-**By default, schema is created automatically** when you initialize the backend:
+**Recommended approach** - Explicit schema setup during initialization:
 
 ```typescript
 import postgres from "postgres";
-import { createPostgresBackend } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const backend = await createPostgresBackend(sql);
-// Tables and indexes are now created automatically!
+
+// Setup phase: Create tables and indexes (call once during initialization)
+await setupSchema(sql);
+
+// Usage phase: Create lock function (synchronous)
+const lock = createLock(sql);
 ```
 
-**Optional: Manual schema creation** (recommended for production deployments):
+**Alternative: Manual schema creation** (recommended for production deployments):
 
 ```bash
 # Create schema manually before initializing backend
 psql -U postgres -d myapp < postgres/schema.sql
 
-# Then disable auto-creation
-const backend = await createPostgresBackend(sql, {
-  autoCreateTables: false  // Skip automatic schema creation
-});
+# Then use the lock directly
+const lock = createLock(sql);
 ```
 
 ### Testing
@@ -136,15 +138,22 @@ bun run test:integration postgres
 ## Configuration
 
 ```typescript
-import { createPostgresBackend } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 import postgres from "postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const backend = await createPostgresBackend(sql, {
+
+// Setup tables with custom names
+await setupSchema(sql, {
   tableName: "app_locks", // Default: "syncguard_locks"
   fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
+});
+
+// Create lock with matching config
+const lock = createLock(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
   cleanupInIsLocked: false, // Default: false
-  autoCreateTables: true, // Default: true
 });
 ```
 

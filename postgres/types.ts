@@ -33,12 +33,6 @@ export interface PostgresBackendOptions {
    * @default false
    */
   cleanupInIsLocked?: boolean;
-
-  /**
-   * Automatically create tables if they don't exist.
-   * @default true
-   */
-  autoCreateTables?: boolean;
 }
 
 /**
@@ -48,7 +42,6 @@ export interface PostgresConfig {
   tableName: string;
   fenceTableName: string;
   cleanupInIsLocked: boolean;
-  autoCreateTables: boolean;
 }
 
 /**

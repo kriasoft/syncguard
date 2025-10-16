@@ -26,6 +26,7 @@ import type { Sql } from "postgres";
 import postgres from "postgres";
 import type { LockBackend } from "../../common/backend.js";
 import { createPostgresBackend } from "../../postgres/backend.js";
+import { setupSchema } from "../../postgres/schema.js";
 import type { PostgresCapabilities } from "../../postgres/types.js";
 
 describe("PostgreSQL Integration Tests", () => {
@@ -55,11 +56,16 @@ describe("PostgreSQL Integration Tests", () => {
       );
     }
 
-    // Create backend with test-specific table names
-    backend = await createPostgresBackend(sql, {
+    // Setup schema with test-specific table names
+    await setupSchema(sql, {
       tableName: `${testTablePrefix}syncguard_locks`,
       fenceTableName: `${testTablePrefix}syncguard_fence_counters`,
-      autoCreateTables: true,
+    });
+
+    // Create backend (synchronous)
+    backend = createPostgresBackend(sql, {
+      tableName: `${testTablePrefix}syncguard_locks`,
+      fenceTableName: `${testTablePrefix}syncguard_fence_counters`,
     });
   });
 

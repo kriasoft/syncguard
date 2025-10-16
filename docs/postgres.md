@@ -21,11 +21,16 @@ npm install syncguard postgres
 ## Quick Start
 
 ```ts
-import { createLock } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 import postgres from "postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const lock = await createLock(sql);
+
+// Setup schema (once, during initialization)
+await setupSchema(sql);
+
+// Create lock function (synchronous)
+const lock = createLock(sql);
 
 await lock(
   async () => {
@@ -38,40 +43,41 @@ await lock(
 
 ## Schema Setup
 
-::: tip Automatic Schema Creation
-By default, tables and indexes are **created automatically** when you initialize the PostgreSQL backend. No manual setup required for development!
+::: tip Recommended Setup Pattern
+Call `setupSchema()` once during application initialization to create required tables and indexes. This is an idempotent operation that's safe to call multiple times.
 :::
 
-### Quick Start (Auto Schema)
+### Quick Start
 
 ```ts
 import postgres from "postgres";
-import { createPostgresBackend } from "syncguard/postgres";
+import { setupSchema, createLock } from "syncguard/postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
-const backend = await createPostgresBackend(sql);
-// Tables and indexes are now created automatically!
+
+// Setup schema (once, during initialization)
+await setupSchema(sql);
+
+// Create lock (synchronous, can be called multiple times)
+const lock = createLock(sql);
 ```
 
-The following are created automatically:
+The `setupSchema()` function creates:
 
 - **syncguard_locks** table with primary key on `key`
 - **UNIQUE INDEX** on `lock_id` (enables fast reverse lookups)
 - **INDEX** on `expires_at_ms` (enables efficient cleanup)
 - **syncguard_fence_counters** table with primary key on `fence_key`
 
-### Production Setup (Manual Schema)
+### Production Setup (Manual Migrations)
 
-For production deployments, **disable auto-creation** and use migrations:
+For production deployments, use database migrations instead of `setupSchema()`:
 
-```ts
-// 1. Create schema via migrations (before deployment)
-// psql -U postgres -d myapp < postgres/schema.sql
+```bash
+# 1. Create schema via migrations (before deployment)
+psql -U postgres -d myapp < postgres/schema.sql
 
-// 2. Disable auto-creation in backend config
-const backend = await createPostgresBackend(sql, {
-  autoCreateTables: false, // Use migrations in production
-});
+# 2. Deploy application code (no setupSchema() call needed)
 ```
 
 **Why manual migrations in production?**
@@ -79,7 +85,7 @@ const backend = await createPostgresBackend(sql, {
 - Explicit control over schema changes
 - Version controlled database changes
 - Avoid schema drift between environments
-- Better performance (no startup checks)
+- Better separation between deployment and application startup
 
 ### Complete Schema Reference
 
@@ -149,13 +155,19 @@ ADD COLUMN IF NOT EXISTS acquired_at_ts TIMESTAMPTZ GENERATED ALWAYS AS (to_time
 ### Backend Options
 
 ```ts
-import { createPostgresBackend } from "syncguard/postgres";
+import { setupSchema, createPostgresBackend } from "syncguard/postgres";
 
-const backend = await createPostgresBackend(sql, {
+// Setup with custom table names
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
+
+// Create backend with matching config
+const backend = createPostgresBackend(sql, {
   tableName: "app_locks", // Lock table (default: "syncguard_locks")
   fenceTableName: "app_fence_counters", // Fence counter table (default: "syncguard_fence_counters")
   cleanupInIsLocked: false, // Enable cleanup in isLocked (default: false)
-  autoCreateTables: true, // Auto-create tables (default: true)
 });
 ```
 
@@ -164,21 +176,18 @@ const backend = await createPostgresBackend(sql, {
 ```ts
 const prefix = process.env.NODE_ENV === "production" ? "prod" : "dev";
 
-const backend = await createPostgresBackend(sql, {
+await setupSchema(sql, {
+  tableName: `${prefix}_locks`,
+  fenceTableName: `${prefix}_fence_counters`,
+});
+
+const backend = createPostgresBackend(sql, {
   tableName: `${prefix}_locks`,
   fenceTableName: `${prefix}_fence_counters`,
 });
 ```
 
 **Cleanup in isLocked**: When enabled, expired locks may be cleaned up during `isLocked()` checks. Disabled by default to maintain pure read semantics.
-
-**Auto-create Tables**: When enabled (default), tables are created automatically if they don't exist. Disable in production and use migrations instead:
-
-```ts
-const backend = await createPostgresBackend(sql, {
-  autoCreateTables: false, // Use migrations in production
-});
-```
 
 ::: warning Index Requirements
 Create indexes for **both** tables if using custom names. See `postgres/schema.sql` for complete schema definitions.
@@ -356,9 +365,10 @@ const handleWebhook = async (webhookId: string, payload: unknown) => {
 ### Long-Running Tasks with Heartbeat
 
 ```ts
-import { owns } from "syncguard";
+import { owns, setupSchema, createPostgresBackend } from "syncguard/postgres";
 
-const backend = await createPostgresBackend(sql);
+await setupSchema(sql);
+const backend = createPostgresBackend(sql);
 const result = await backend.acquire({ key: "batch:report", ttlMs: 60000 });
 
 if (result.ok) {

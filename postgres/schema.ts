@@ -5,25 +5,42 @@ import type { Sql } from "postgres";
 import type { PostgresConfig } from "./types.js";
 
 /**
- * Ensures required tables and indexes exist for lock storage.
+ * Sets up required schema (tables and indexes) for PostgreSQL lock backend.
  *
- * Creates:
- * - syncguard_locks table (primary key on 'key')
- * - idx_lock_id index for fast lockId lookups
- * - syncguard_fence_counters table (primary key on 'fence_key')
+ * Creates (if not exist):
+ * - Lock table with primary key on 'key' and indexes on 'lock_id' and 'expires_at_ms'
+ * - Fence counter table with primary key on 'fence_key'
  *
- * Tables are created with IF NOT EXISTS, making this operation idempotent.
+ * This is an idempotent operation and safe to call multiple times.
+ * Call this once during application initialization, before creating lock backends.
  *
  * @param sql - postgres.js SQL instance
- * @param config - PostgreSQL backend configuration
+ * @param options - Optional configuration for table names
+ * @returns Promise that resolves when schema is created
+ *
+ * @example
+ * ```typescript
+ * import postgres from 'postgres';
+ * import { setupSchema, createLock } from 'syncguard/postgres';
+ *
+ * const sql = postgres('postgresql://localhost:5432/myapp');
+ *
+ * // Setup phase (once, during initialization)
+ * await setupSchema(sql);
+ *
+ * // Usage phase (synchronous)
+ * const lock = createLock(sql);
+ * ```
  */
-export async function ensureTables(
+export async function setupSchema(
   sql: Sql,
-  config: PostgresConfig,
+  options: { tableName?: string; fenceTableName?: string } = {},
 ): Promise<void> {
-  if (!config.autoCreateTables) {
-    return;
-  }
+  // Create config from options to get validated table names
+  const config = {
+    tableName: options.tableName ?? "syncguard_locks",
+    fenceTableName: options.fenceTableName ?? "syncguard_fence_counters",
+  } as PostgresConfig;
 
   // Create locks table
   await sql.unsafe(`
