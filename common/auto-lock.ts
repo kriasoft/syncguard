@@ -67,11 +67,11 @@ function calculateRetryDelay(
  */
 /**
  * Creates a curried lock function bound to a specific backend.
- * Useful for creating reusable lock instances with a specific backend.
+ * Internal utility used by backend-specific createLock() convenience functions.
  *
- * @param backend - Lock backend (Redis, Firestore, custom)
+ * @internal
+ * @param backend - Lock backend (Redis, Firestore, Postgres, custom)
  * @returns A function that accepts fn and config
- * @deprecated Use lock() directly instead
  */
 export function createAutoLock<C extends BackendCapabilities>(
   backend: LockBackend<C>,

@@ -4,10 +4,13 @@
 /**
  * Unit tests for the core lock function implementation
  *
- * Tests the createAutoLock function behavior including:
+ * Tests the createAutoLock internal utility function behavior including:
  * - Automatic lock management with withLock pattern
  * - Release error handling and callbacks
  * - Error propagation and cleanup behavior
+ *
+ * Note: createAutoLock is an internal utility used by backend modules.
+ * Public API users should use lock() directly or backend-specific createLock().
  */
 
 import {

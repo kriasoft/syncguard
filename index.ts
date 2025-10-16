@@ -54,7 +54,7 @@ export {
 export { generateLockId, hashKey, makeStorageKey } from "./common/crypto.js";
 
 // Primary lock API with automatic retry and cleanup
-export { createAutoLock, lock } from "./common/auto-lock.js";
+export { lock } from "./common/auto-lock.js";
 
 // Diagnostic helpers for lock inspection and ownership verification
 export {

@@ -8,7 +8,8 @@
  * @see specs/interface.md - LockBackend API contracts
  */
 
-export * from "./auto-lock.js";
+// Export createAutoLock for internal use by backend modules only
+export { createAutoLock, lock } from "./auto-lock.js";
 export * from "./config.js";
 export * from "./constants.js";
 export * from "./crypto.js";
