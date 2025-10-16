@@ -64,10 +64,18 @@ export function mapFirestoreError(error: any): LockError {
     );
   }
 
+  // Network timeout errors
+  if (errorMessage.includes("DEADLINE_EXCEEDED")) {
+    return new LockError(
+      "NetworkTimeout",
+      `Firestore timeout: ${errorMessage}`,
+      { cause: error },
+    );
+  }
+
   // ABORTED treated as transient - transaction conflicts are retryable
   if (
     errorMessage.includes("UNAVAILABLE") ||
-    errorMessage.includes("DEADLINE_EXCEEDED") ||
     errorMessage.includes("INTERNAL") ||
     errorMessage.includes("ABORTED")
   ) {

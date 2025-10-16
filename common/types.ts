@@ -58,6 +58,8 @@ export type Fence = string;
 
 /**
  * Hash identifier for observability (SHA-256 truncated to 96 bits, 24 hex chars).
+ *
+ * @see specs/interface.md#hash-identifier-format - Normative specification
  */
 export type HashId = string;
 
@@ -100,6 +102,8 @@ export type ExtendResult = { ok: true; expiresAtMs: number } | { ok: false };
 
 /**
  * Sanitized lock info from lookup(). Hashed identifiers prevent accidental logging.
+ *
+ * @see specs/interface.md#lock-information-types - Normative specification
  */
 export type LockInfo<C extends BackendCapabilities> = {
   /** SHA-256 hash of key (96-bit truncated) */
@@ -114,6 +118,8 @@ export type LockInfo<C extends BackendCapabilities> = {
 
 /**
  * Debug variant with raw identifiers (via getByKeyRaw/getByIdRaw helpers). SECURITY: Contains sensitive data.
+ *
+ * @see specs/interface.md#lock-information-types - Normative specification
  */
 export type LockInfoDebug<C extends BackendCapabilities> = LockInfo<C> & {
   /** Raw key for debugging */
@@ -206,6 +212,8 @@ export interface LockBackend<
 
 /**
  * Minimal event structure for telemetry. Hashes computed on-demand.
+ *
+ * @see specs/interface.md#telemetry-event-types - Normative specification
  */
 export type LockEvent = {
   /** Operation type (acquire, release, extend, isLocked, lookup) */

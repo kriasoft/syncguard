@@ -162,11 +162,13 @@ const live = isLive(storedExpiresAtMs, nowMs, TIME_TOLERANCE_MS);
 
 **Production Requirements**:
 
-- **MUST**: Deploy NTP synchronization on ALL clients to maintain clock accuracy within ±500ms
-- **MUST**: Implement NTP sync monitoring in deployment pipeline (fail deployments with >200ms drift)
+- **MUST**: Deploy NTP synchronization on ALL clients
+- **MUST**: Implement NTP sync monitoring in deployment pipeline
 - **MUST**: Add application-level health checks that detect and alert on clock skew
 - **SHOULD**: Monitor client clock drift via system metrics or health checks
 - **SHOULD**: Use Redis backend instead if reliable time sync cannot be guaranteed across all clients
+
+**Clock Synchronization Policy**: See [Firestore Clock Synchronization Requirements](#firestore-clock-sync-requirements) below for the normative operational policy ladder and its relationship to TIME_TOLERANCE_MS
 
 **Unified Tolerance**: See `TIME_TOLERANCE_MS` in interface.md for normative tolerance specification.
 
@@ -179,7 +181,7 @@ const live = isLive(storedExpiresAtMs, nowMs, TIME_TOLERANCE_MS);
 **Multi-Client Clock Skew Handling**:
 
 - **Race condition risk**: Client A may see lock as expired while Client B sees it as live
-- **Mitigation 1**: Enforce NTP sync monitoring in deployment pipeline (fail deployments with >200ms drift)
+- **Mitigation 1**: Enforce NTP sync monitoring in deployment pipeline (see [Clock Synchronization Requirements](#firestore-clock-sync-requirements))
 - **Mitigation 2**: Use Redis backend for environments where client time sync is unreliable
 - **Mitigation 3**: Add application-level health checks that detect and alert on clock skew
 
@@ -190,6 +192,44 @@ const live = isLive(storedExpiresAtMs, nowMs, TIME_TOLERANCE_MS);
 - Production monitoring guidance for client clock drift
 - Failure scenarios and mitigation strategies for client time authority
 - When to switch to Redis backend for centralized time authority
+
+---
+
+## Firestore Clock Synchronization Requirements {#firestore-clock-sync-requirements}
+
+### Requirements
+
+**Operational Policy Ladder** (graduated clock drift thresholds):
+
+```
+Target:  ≤ ±100 ms  → Optimal operational target for production systems
+Warn:    ≥ ±200 ms  → Trigger alerts, investigate clock sync issues
+Block:   ≥ ±500 ms  → Fail deployment, prevent unsafe operations
+```
+
+**Relationship to TIME_TOLERANCE_MS (1000 ms)**:
+
+- `TIME_TOLERANCE_MS = 1000 ms` is the **library's internal safety margin** that accommodates clock skew up to the operational limits
+- The operational policy ladder (100/200/500) defines **deployment and monitoring SLOs** within this safety margin
+- The safety margin (1000 ms) is intentionally larger than the block threshold (500 ms) to provide operational buffer
+
+**Operational Implementation**:
+
+- **MUST**: Configure deployment pipeline to block deployments when client clock drift ≥ ±500 ms
+- **MUST**: Configure monitoring to alert when client clock drift ≥ ±200 ms (early warning)
+- **SHOULD**: Target ≤ ±100 ms clock accuracy for optimal behavior and safety margin
+
+### Rationale & Notes
+
+**Why graduated policy**: Provides clear operational stages (target/warn/block) for different severity levels, following industry best practices for alert escalation.
+
+**Why 1000 ms safety margin**: Accommodates the operational policy ladder (up to 500 ms block threshold) while providing additional buffer for transient clock skew during NTP resync events.
+
+**Why these specific thresholds**:
+
+- **100 ms target**: Matches typical NTP sync accuracy, provides comfortable safety margin
+- **200 ms warning**: Early signal to investigate before reaching block threshold
+- **500 ms block**: Conservative deployment safety limit within TIME_TOLERANCE_MS buffer
 
 ---
 
@@ -235,75 +275,11 @@ if (result.ok) {
 
 ## Fencing Token Implementation
 
-### Requirements
+**NORMATIVE IMPLEMENTATION**: See `firestore/operations/acquire.ts` for canonical transaction pattern with inline documentation.
 
-```typescript
-// In acquire transaction: read-then-write pattern following Firestore transaction rules
-await db.runTransaction(async (trx) => {
-  // MUST capture nowMs inside transaction for authoritative client-time (ADR-010)
-  const nowMs = Date.now();
+### Required Characteristics
 
-  // Generate document IDs using canonical two-step pattern
-  const baseKey = makeStorageKey("", normalizedKey, 1500, 0);
-  const fenceDocId = makeStorageKey("", `fence:${baseKey}`, 1500, 0);
-
-  const lockDoc = locksCollection.doc(baseKey);
-  const fenceCounterDoc = fenceCounterCollection.doc(fenceDocId);
-
-  // READ PHASE: All reads must come first (Firestore requirement)
-  const currentLockDoc = await trx.get(lockDoc);
-  const currentCounterDoc = await trx.get(fenceCounterDoc);
-
-  // Check for existing lock (contention logic)...
-
-  // Calculate next fence value from persistent counter using BigInt for precision safety
-  const currentFenceStr = currentCounterDoc.data()?.fence || "000000000000000";
-  const currentFence = BigInt(currentFenceStr);
-  const nextFence = currentFence + 1n;
-
-  // Overflow enforcement (ADR-004): MUST throw if fence exceeds FENCE_THRESHOLDS.MAX
-  const overflowLimit = BigInt(FENCE_THRESHOLDS.MAX);
-  if (nextFence > overflowLimit) {
-    throw new LockError(
-      "Internal",
-      `Fence counter overflow - exceeded operational limit (${FENCE_THRESHOLDS.MAX})`,
-    );
-  }
-
-  // MANDATORY: Log warning via shared utility when approaching limit
-  const warningThreshold = BigInt(FENCE_THRESHOLDS.WARN);
-  if (nextFence > warningThreshold) {
-    logFenceWarning(nextFence.toString(), userKey);
-  }
-
-  // Format using common formatter pattern
-  const nextFenceStr = formatFence(nextFence);
-
-  // WRITE PHASE: Update both counter and lock documents atomically
-  await trx.set(fenceCounterDoc, {
-    fence: nextFenceStr,
-    keyDebug: userKey, // For debugging (optional)
-  });
-
-  // Compute expiresAtMs from authoritative time captured inside transaction
-  const expiresAtMs = nowMs + ttlMs;
-  const acquiredAtMs = nowMs;
-
-  await trx.set(lockDoc, {
-    lockId,
-    expiresAtMs,
-    acquiredAtMs,
-    key: userKey,
-    fence: nextFenceStr, // Copy for convenience
-  });
-
-  return { ok: true, lockId, expiresAtMs, fence: nextFenceStr };
-});
-```
-
-**Required Implementation Details**:
-
-- **Dual Document Pattern**: Fence counters stored in separate collection from lock documents
+- **Dual Document Pattern**: Fence counters in separate collection (`fence_counters`) from lock documents (`locks`)
 - **Fence Document ID Generation**: MUST use [Two-Step Fence Key Derivation Pattern](interface.md#fence-key-derivation)
 - **Lifecycle Independence**: Counter documents persist indefinitely; cleanup operations MUST NOT delete counter documents
 - **Atomicity**: Fence increment and lock creation MUST occur within same `runTransaction()`
@@ -316,6 +292,7 @@ await db.runTransaction(async (trx) => {
 - **Format**: Return 15-digit zero-padded decimal strings for lexicographic ordering
 - **Overflow Enforcement (ADR-004)**: Backend MUST validate fence value and throw `LockError("Internal")` if fence > `FENCE_THRESHOLDS.MAX`; MUST log warnings via `logFenceWarning()` when fence > `FENCE_THRESHOLDS.WARN`. Canonical threshold values defined in `common/constants.ts`.
 - **Collection Configuration**: Both lock and fence counter collections MUST be configurable
+- **Time Authority (ADR-010)**: MUST capture `Date.now()` inside transaction for authoritative client-time expiresAtMs
 
 ### Rationale & Notes
 
@@ -324,6 +301,8 @@ await db.runTransaction(async (trx) => {
 **Why read-then-write**: Firestore transactions require all reads before any writes. Violating this causes transaction failures.
 
 **Why copy fence to lock document**: Convenience. Allows lock info retrieval without secondary counter document lookup.
+
+**See implementation**: `firestore/operations/acquire.ts` contains complete transaction logic with defensive guards and error handling.
 
 ---
 
@@ -372,6 +351,28 @@ MUST ensure single-field index on `lockId` is available for release/extend/looku
 
 ---
 
+## Defensive Duplicate LockId Detection
+
+### Requirements
+
+**SHOULD Requirements for Operations Querying by LockId** (release, extend, lookup):
+
+- Operations SHOULD omit `.limit(1)` from lockId queries to enable duplicate detection (ADR-014)
+- Operations SHOULD detect and handle duplicate lockId documents defensively
+- When duplicates detected: log warning, optionally cleanup expired duplicates, fail-safe on live duplicates
+
+**Implementation guidance**: See JSDoc comments in `firestore/operations/*.ts` for detection patterns and cleanup strategies.
+
+### Rationale & Notes
+
+**Why SHOULD not MUST**: Defensive feature for operational resilience, not a correctness requirement.
+
+**Why remove .limit(1)**: Firestore's `.limit(1)` caps results at 1 document, preventing duplicate detection.
+
+**See ADR-014** for complete rationale and design decisions.
+
+---
+
 ## Operation-Specific Behavior
 
 ### Acquire Operation Requirements
@@ -401,16 +402,16 @@ MUST ensure single-field index on `lockId` is available for release/extend/looku
 
 ### Release Operation Requirements
 
-**MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via Firestore transactions:
+- **LockId Validation**: MUST call `validateLockId(lockId)` and throw `LockError("InvalidArgument")` on malformed input
+- **Defensive Duplicate Detection**: SHOULD implement duplicate lockId detection per [Defensive Duplicate LockId Detection](#defensive-duplicate-lockid-detection) section (ADR-014)
+- **MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via Firestore transactions:
 
 ```typescript
 import { isLive, TIME_TOLERANCE_MS } from "../common/time-predicates.js";
 
 await db.runTransaction(async (trx) => {
-  // Query by lockId index
-  const querySnapshot = await trx.get(
-    collection.where("lockId", "==", lockId).limit(1),
-  );
+  // Query by lockId index (no .limit(1) to enable duplicate detection per ADR-014)
+  const querySnapshot = await trx.get(collection.where("lockId", "==", lockId));
 
   const doc = querySnapshot.docs[0];
   const data = doc?.data();
@@ -447,6 +448,8 @@ await db.runTransaction(async (trx) => {
 
 ### Extend Operation Requirements
 
+- **LockId Validation**: MUST call `validateLockId(lockId)` and throw `LockError("InvalidArgument")` on malformed input
+- **Defensive Duplicate Detection**: SHOULD implement duplicate lockId detection per [Defensive Duplicate LockId Detection](#defensive-duplicate-lockid-detection) section (ADR-014)
 - **MUST return authoritative expiresAtMs**: Computed from client time authority (`Date.now()`) to ensure consistency and accurate heartbeat scheduling. No approximation allowed (see ADR-010).
 - **MUST compute `expiresAtMs` inside the transaction using `Date.now()` captured there; NEVER pre-compute outside the transaction.**
 - **MUST implement [TOCTOU Protection](interface.md#storage-requirements)** via Firestore transactions:
@@ -458,10 +461,8 @@ await db.runTransaction(async (trx) => {
   // MUST capture nowMs inside transaction for authoritative client-time (ADR-010)
   const nowMs = Date.now();
 
-  // Query by lockId index
-  const querySnapshot = await trx.get(
-    collection.where("lockId", "==", lockId).limit(1),
-  );
+  // Query by lockId index (no .limit(1) to enable duplicate detection per ADR-014)
+  const querySnapshot = await trx.get(collection.where("lockId", "==", lockId));
 
   const doc = querySnapshot.docs[0];
   const data = doc?.data();
@@ -530,7 +531,8 @@ await db.runTransaction(async (trx) => {
 
 **LockId Lookup Mode**:
 
-- **Implementation**: Query by lockId index: `collection.where('lockId', '==', lockId).limit(1).get()`
+- **Implementation**: Query by lockId index: `collection.where('lockId', '==', lockId).get()` (no `.limit(1)` per ADR-014)
+- **Defensive Duplicate Detection**: SHOULD implement duplicate lockId detection per [Defensive Duplicate LockId Detection](#defensive-duplicate-lockid-detection) section (ADR-014)
 - **Complexity**: Index traversal + verification
 - **Atomicity**: Single indexed query (non-atomic is acceptable per interface.md, as lookup is diagnostic-only; release/extend use transactions for full TOCTOU safety)
 - **Performance**: Indexed equality query, requires lockId field index
@@ -619,7 +621,8 @@ checkAborted(opts.signal); // After read
 
 **Key Firestore mappings**:
 
-- **ServiceUnavailable**: `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, `ABORTED` (transaction conflicts)
+- **ServiceUnavailable**: `UNAVAILABLE`, `INTERNAL`, `ABORTED` (transaction conflicts)
+- **NetworkTimeout**: `DEADLINE_EXCEEDED`
 - **AuthFailed**: `PERMISSION_DENIED`, `UNAUTHENTICATED`
 - **InvalidArgument**: `INVALID_ARGUMENT`, `FAILED_PRECONDITION`
 - **RateLimited**: `RESOURCE_EXHAUSTED`

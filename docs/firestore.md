@@ -110,11 +110,12 @@ Firestore uses **client time** for expiration checks. NTP synchronization is **r
 ### Requirements
 
 - **Unified Tolerance**: Fixed 1000ms tolerance (same as Redis) for consistent cross-backend behavior (ADR-005)
-- **NTP Sync (REQUIRED)**: Keep client clocks within ±500ms accuracy for reliable operation
-- **Deployment Monitoring (REQUIRED)**: Implement NTP sync monitoring in deployment pipeline - fail deployments with >200ms drift
+- **NTP Sync (REQUIRED)**: Deploy NTP synchronization on ALL clients
+- **Deployment Monitoring (REQUIRED)**: Implement NTP sync monitoring in deployment pipeline
 - **Health Checks (REQUIRED)**: Add application-level health checks that detect and alert on clock skew
-- **Drift Monitoring**: Alert on NTP drift exceeding ±250ms
 - **Non-configurable**: Tolerance is internal and cannot be changed to prevent semantic drift
+
+**Operational Policy**: See [specs/firestore-backend.md § Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) for the complete operational policy ladder (target/warn/block thresholds) and their relationship to TIME_TOLERANCE_MS.
 
 ### Checking Time Sync
 
@@ -123,19 +124,19 @@ Firestore uses **client time** for expiration checks. NTP synchronization is **r
 timedatectl status
 
 # Expected: "System clock synchronized: yes"
-# Offset should be < 500ms
+# Check offset is within operational targets (see spec for thresholds)
 ```
 
 ::: danger Production Requirement
-If reliable time synchronization cannot be guaranteed within ±500ms, **use Redis backend instead**.
+If reliable time synchronization cannot be guaranteed, **use Redis backend instead**. See the [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) spec for specific deployment and monitoring thresholds.
 :::
 
 ### Why Client Time?
 
 Firestore doesn't provide server time queries. All expiration logic uses `Date.now()`. This works reliably when:
 
-1. Servers are NTP-synchronized
-2. Combined clock drift stays under tolerance
+1. Servers are NTP-synchronized (see operational policy in specs)
+2. Combined clock drift stays within TIME_TOLERANCE_MS (1000ms)
 3. Operations complete within expected timeframes
 
 ## Performance
@@ -350,7 +351,7 @@ RUN apt-get update && apt-get install -y ntpdate
 - Locks never expire despite TTL passing
 - `extend()` operations fail with "expired" errors
 
-**Solution**: Verify all servers have NTP sync within ±500ms.
+**Solution**: Verify all servers have NTP sync within operational thresholds. See [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) for deployment policy (target/warn/block thresholds).
 
 ### Transaction Conflicts
 

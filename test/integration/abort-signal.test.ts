@@ -48,13 +48,11 @@ describe("AbortSignal support", () => {
   });
 
   describe("Redis backend", () => {
-    test("passes AbortSignal to ioredis (behavior depends on ioredis)", async () => {
+    test("respects pre-dispatch AbortSignal (already aborted)", async () => {
       const controller = new AbortController();
       const key = `abort-test-${Date.now()}`;
 
-      // Note: ioredis may not throw immediately for already-aborted signals
-      // It checks the signal during network operations
-      // This test verifies the signal is accepted without errors
+      // Abort before calling
       controller.abort();
 
       try {
@@ -63,18 +61,96 @@ describe("AbortSignal support", () => {
           ttlMs: 1000,
           signal: controller.signal,
         });
-        // ioredis might complete fast operations before checking signal
+        throw new Error("Should have thrown LockError");
       } catch (error) {
-        // If ioredis does abort, verify it's a proper error
-        expect(error).toBeTruthy();
+        expect(error).toBeInstanceOf(LockError);
+        if (error instanceof LockError) {
+          expect(error.code).toBe("Aborted");
+          expect(error.message).toContain("aborted");
+        }
       }
     });
 
-    test("accepts AbortSignal parameter in all operations", async () => {
+    test("pre-dispatch abort check in all operations", async () => {
       const controller = new AbortController();
       const key = `abort-test-${Date.now()}`;
 
-      // Acquire a lock first
+      // Acquire a lock first (without signal)
+      const result = await redisBackend.acquire({
+        key,
+        ttlMs: 1000,
+      });
+      expect(result.ok).toBe(true);
+
+      if (!result.ok) return;
+
+      // Abort the controller
+      controller.abort();
+
+      // Test that all operations throw when signal is already aborted
+      try {
+        await redisBackend.extend({
+          lockId: result.lockId,
+          ttlMs: 2000,
+          signal: controller.signal,
+        });
+        throw new Error("extend should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LockError);
+        if (error instanceof LockError) {
+          expect(error.code).toBe("Aborted");
+        }
+      }
+
+      try {
+        await redisBackend.isLocked({
+          key,
+          signal: controller.signal,
+        });
+        throw new Error("isLocked should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LockError);
+        if (error instanceof LockError) {
+          expect(error.code).toBe("Aborted");
+        }
+      }
+
+      try {
+        await redisBackend.lookup({
+          key,
+          signal: controller.signal,
+        });
+        throw new Error("lookup should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LockError);
+        if (error instanceof LockError) {
+          expect(error.code).toBe("Aborted");
+        }
+      }
+
+      try {
+        await redisBackend.release({
+          lockId: result.lockId,
+          signal: controller.signal,
+        });
+        throw new Error("release should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LockError);
+        if (error instanceof LockError) {
+          expect(error.code).toBe("Aborted");
+        }
+      }
+
+      // Cleanup without signal
+      await redisBackend.release({ lockId: result.lockId });
+    });
+
+    test("operations succeed when signal is not aborted", async () => {
+      // This test verifies that passing a non-aborted signal doesn't break operations
+      const controller = new AbortController();
+      const key = `abort-test-${Date.now()}`;
+
+      // Type check: these should compile without errors
       const result = await redisBackend.acquire({
         key,
         ttlMs: 1000,
@@ -84,46 +160,20 @@ describe("AbortSignal support", () => {
 
       if (!result.ok) return;
 
-      // Test that signal parameter is accepted (may not abort immediately)
-      const extendResult = await redisBackend.extend({
-        lockId: result.lockId,
-        ttlMs: 2000,
-        signal: controller.signal,
-      });
-
       const isLocked = await redisBackend.isLocked({
         key,
         signal: controller.signal,
       });
+      expect(isLocked).toBe(true);
 
       const lookupResult = await redisBackend.lookup({
         key,
         signal: controller.signal,
       });
-
-      // Verify operations work with signal parameter
-      expect(extendResult.ok).toBe(true);
-      expect(isLocked).toBe(true);
       expect(lookupResult).not.toBeNull();
 
       // Cleanup
       await redisBackend.release({ lockId: result.lockId });
-    });
-
-    test("signal is passed through to ioredis client", async () => {
-      // This test verifies the type safety - signal parameter is accepted
-      const controller = new AbortController();
-      const key = `abort-test-${Date.now()}`;
-
-      // Type check: these should compile without errors
-      const operations = [
-        redisBackend.acquire({ key, ttlMs: 1000, signal: controller.signal }),
-        redisBackend.isLocked({ key, signal: controller.signal }),
-        redisBackend.lookup({ key, signal: controller.signal }),
-      ];
-
-      // All operations should accept signal parameter
-      await Promise.all(operations);
     });
   });
 
@@ -302,11 +352,25 @@ describe("AbortSignal support", () => {
   });
 
   describe("Cross-backend consistency", () => {
-    test("Firestore throws LockError for aborted operations", async () => {
+    test("both backends throw LockError('Aborted') for pre-aborted operations", async () => {
       const controller = new AbortController();
       const key = `abort-test-${Date.now()}`;
 
       controller.abort();
+
+      // Test Redis - should throw on pre-dispatch check
+      let redisError: LockError | null = null;
+      try {
+        await redisBackend.acquire({
+          key: `redis-${key}`,
+          ttlMs: 1000,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (error instanceof LockError) {
+          redisError = error;
+        }
+      }
 
       // Test Firestore - should throw immediately
       let firestoreError: LockError | null = null;
@@ -322,16 +386,18 @@ describe("AbortSignal support", () => {
         }
       }
 
-      // Firestore should throw LockError with Aborted code
+      // Both should throw LockError with Aborted code
+      expect(redisError).toBeTruthy();
+      expect(redisError?.code).toBe("Aborted");
       expect(firestoreError).toBeTruthy();
       expect(firestoreError?.code).toBe("Aborted");
     });
 
-    test("both backends accept AbortSignal parameter", async () => {
+    test("both backends accept AbortSignal parameter when not aborted", async () => {
       const controller = new AbortController();
       const key = `abort-test-${Date.now()}`;
 
-      // Both backends should accept signal parameter
+      // Both backends should accept signal parameter and succeed when not aborted
       const redisResult = await redisBackend.acquire({
         key: `redis-${key}`,
         ttlMs: 1000,

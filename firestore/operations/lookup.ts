@@ -23,17 +23,11 @@ import type {
 } from "../types.js";
 
 /**
- * Creates lookup operation for Firestore backend.
+ * Retrieves lock info by key or lockId (diagnostic only, non-atomic).
  *
- * NOTE: Firestore uses non-atomic indexed queries with post-read verification.
- * Per ADR-011, this is acceptable because lookup is DIAGNOSTIC ONLY—correctness
- * relies on atomic release/extend operations (which use transactions), NOT lookup
- * results. For Redis, atomicity is required due to multi-key reads; for Firestore,
- * single indexed queries with explicit lockId verification suffice.
- *
- * @returns Async function that retrieves lock info by key or lockId
- * @see common/time-predicates.ts for expiration logic
- * @see specs/adrs.md ADR-011 for atomicity rationale
+ * @remarks
+ * Non-atomic queries acceptable for diagnostic lookups (ADR-011). Omits `.limit(1)`
+ * to detect duplicate lockIds (ADR-014). See: specs/adrs.md (ADR-011, ADR-014)
  */
 export function createLookupOperation(
   db: Firestore,
@@ -53,7 +47,7 @@ export function createLookupOperation(
       const RESERVE_BYTES = 0; // No derived keys in Firestore
 
       if ("key" in opts) {
-        // Key lookup path: validates and normalizes key
+        // Key lookup: validate and normalize, then fetch by document ID
         const normalizedKey = normalizeAndValidateKey(opts.key);
         const storageKey = makeStorageKey(
           "",
@@ -71,12 +65,18 @@ export function createLookupOperation(
           return null;
         }
       } else {
-        // LockId lookup path: validates lockId and queries by index
+        // LockId lookup: validate and query index without .limit(1) (ADR-014)
         validateLockId(opts.lockId);
         const querySnapshot = await locksCollection
           .where("lockId", "==", opts.lockId)
-          .limit(1)
           .get();
+
+        // Duplicate detection (ADR-014): log only for diagnostic lookup
+        if (querySnapshot.docs.length > 1) {
+          console.warn(
+            `[syncguard] Duplicate lockId detected in lookup: ${opts.lockId} (${querySnapshot.docs.length} documents)`,
+          );
+        }
 
         // Check for cancellation after read
         checkAborted(opts.signal);
@@ -109,7 +109,7 @@ export function createLookupOperation(
 
       const lockInfo = sanitizeLockInfo(data, capabilities);
 
-      // Preserve raw data for debugging (see: getByKeyRaw/getByIdRaw in common/helpers.ts)
+      // Attach raw data for debugging (see: common/helpers.ts)
       return attachRawData(lockInfo, {
         key: data.key,
         lockId: data.lockId,

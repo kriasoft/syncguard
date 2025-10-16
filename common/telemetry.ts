@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025-present Kriasoft
 // SPDX-License-Identifier: MIT
 
+import { FAILURE_REASON } from "./backend-semantics.js";
 import { hashKey } from "./crypto.js";
 import type {
   BackendCapabilities,
@@ -15,21 +16,21 @@ import type {
 
 /**
  * Wraps a LockBackend with telemetry hooks for observability.
- * Zero-cost abstraction: no performance impact when not used (ADR-007).
+ * Zero-cost abstraction: no performance impact when not used.
  *
  * @param backend - Base backend to instrument
  * @param options - Telemetry configuration with event callback
  * @returns Instrumented backend with same capabilities
- * @see specs/interface.md for usage patterns
- * @see specs/adrs.md ADR-007 for opt-in telemetry decision
+ * @see specs/interface.md Usage patterns and examples
+ * @see specs/adrs.md ADR-007 for opt-in design rationale
  */
 export function withTelemetry<C extends BackendCapabilities>(
   backend: LockBackend<C>,
   options: TelemetryOptions,
 ): LockBackend<C> {
   /**
-   * Emits telemetry event, swallowing any errors to prevent affecting lock operations.
-   * Event callbacks MUST NOT block or throw - errors are silently ignored.
+   * Emits telemetry event, swallowing errors to prevent affecting lock operations.
+   * Telemetry failures MUST NOT impact core functionality.
    */
   const emitEvent = (event: LockEvent): void => {
     try {
@@ -40,21 +41,21 @@ export function withTelemetry<C extends BackendCapabilities>(
   };
 
   /**
-   * Determines if raw identifiers should be included in event.
-   * Default: false (redact for security). Can be boolean or predicate function.
+   * Determines if raw identifiers should be included in events.
+   * Defaults to false for security (redacts keys/lockIds). Supports boolean or predicate.
    */
   const shouldIncludeRaw = (event: LockEvent): boolean => {
     if (typeof options.includeRaw === "function") {
       try {
         return options.includeRaw(event);
       } catch {
-        return false; // Default to redacted on predicate errors
+        return false; // Fail-safe: redact on predicate errors
       }
     }
     return options.includeRaw ?? false;
   };
 
-  // Helper functions for lookup overloads
+  // Lookup helpers for discriminated union overload (KeyLookup | OwnershipLookup)
   const lookupByKey = async (opts: KeyLookup) => {
     const result = await backend.lookup(opts);
 
@@ -100,7 +101,7 @@ export function withTelemetry<C extends BackendCapabilities>(
       };
 
       if (!result.ok) {
-        event.reason = (result as { ok: false; reason: "locked" }).reason;
+        event.reason = result.reason; // "locked" when key already held
       }
 
       if (shouldIncludeRaw(event)) {
@@ -123,6 +124,14 @@ export function withTelemetry<C extends BackendCapabilities>(
         result: result.ok ? "ok" : "fail",
       };
 
+      // Extract internal failure reason metadata (not exposed in public API)
+      if (!result.ok) {
+        const meta = (result as any)[FAILURE_REASON];
+        if (meta?.reason) {
+          event.reason = meta.reason; // "not_found" | "fence_mismatch" | etc.
+        }
+      }
+
       if (shouldIncludeRaw(event)) {
         event.lockId = opts.lockId;
       }
@@ -139,6 +148,14 @@ export function withTelemetry<C extends BackendCapabilities>(
         lockIdHash: hashKey(opts.lockId),
         result: result.ok ? "ok" : "fail",
       };
+
+      // Extract internal failure reason metadata (not exposed in public API)
+      if (!result.ok) {
+        const meta = (result as any)[FAILURE_REASON];
+        if (meta?.reason) {
+          event.reason = meta.reason; // "not_found" | "fence_mismatch" | etc.
+        }
+      }
 
       if (shouldIncludeRaw(event)) {
         event.lockId = opts.lockId;
@@ -166,7 +183,7 @@ export function withTelemetry<C extends BackendCapabilities>(
     },
 
     lookup(opts: KeyLookup | OwnershipLookup): Promise<any> {
-      // Type-safe dispatch based on discriminated union
+      // Dispatch based on discriminated union ("key" vs "lockId" property)
       if ("key" in opts) {
         return lookupByKey(opts);
       } else {
