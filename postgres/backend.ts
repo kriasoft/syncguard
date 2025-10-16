@@ -11,7 +11,6 @@ import {
   createLookupOperation,
   createReleaseOperation,
 } from "./operations/index.js";
-import { ensureTables } from "./schema.js";
 import type { PostgresBackendOptions, PostgresCapabilities } from "./types.js";
 
 /**
@@ -23,30 +22,34 @@ import type { PostgresBackendOptions, PostgresCapabilities } from "./types.js";
  *
  * Uses postgres.js library (porsager/postgres) for optimal performance.
  *
+ * IMPORTANT: Call setupSchema() once before creating backends to set up schema.
+ *
  * @param sql - postgres.js SQL instance
  * @param options - Backend configuration (tables, cleanup options)
  * @returns LockBackend with server-side time authority
- * @see specs/postgres-backend.md (to be created)
+ * @see specs/postgres-backend.md
  *
  * @example
  * ```typescript
  * import postgres from 'postgres';
- * import { createPostgresBackend } from 'syncguard/postgres';
+ * import { createPostgresBackend, setupSchema } from 'syncguard/postgres';
  *
  * const sql = postgres('postgresql://localhost:5432/myapp');
+ *
+ * // Setup schema (once, during initialization)
+ * await setupSchema(sql);
+ *
+ * // Create backend (synchronous)
  * const backend = createPostgresBackend(sql);
  *
  * const result = await backend.acquire({ key: 'resource:123', ttlMs: 30_000 });
  * ```
  */
-export async function createPostgresBackend(
+export function createPostgresBackend(
   sql: Sql,
   options: PostgresBackendOptions = {},
-): Promise<LockBackend<PostgresCapabilities>> {
+): LockBackend<PostgresCapabilities> {
   const config = createPostgresConfig(options);
-
-  // Ensure tables exist (if autoCreateTables is enabled)
-  await ensureTables(sql, config);
 
   const capabilities: Readonly<PostgresCapabilities> = {
     backend: "postgres",

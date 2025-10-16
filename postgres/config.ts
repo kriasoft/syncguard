@@ -17,7 +17,6 @@ export function createPostgresConfig(
   const tableName = options.tableName || "syncguard_locks";
   const fenceTableName = options.fenceTableName || "syncguard_fence_counters";
   const cleanupInIsLocked = options.cleanupInIsLocked ?? false;
-  const autoCreateTables = options.autoCreateTables ?? true;
 
   // Validate: fence table must differ from lock table
   if (fenceTableName === tableName) {
@@ -54,6 +53,5 @@ export function createPostgresConfig(
     tableName,
     fenceTableName,
     cleanupInIsLocked,
-    autoCreateTables,
   };
 }

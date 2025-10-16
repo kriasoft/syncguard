@@ -48,10 +48,15 @@ await lock(
 ### Using PostgreSQL
 
 ```typescript
-import { createLock } from "syncguard/postgres";
+import { createLock, setupSchema } from "syncguard/postgres";
 import postgres from "postgres";
 
 const sql = postgres("postgresql://localhost:5432/myapp");
+
+// Setup schema (once, during initialization)
+await setupSchema(sql);
+
+// Create lock function (synchronous)
 const lock = createLock(sql);
 
 await lock(
@@ -146,6 +151,10 @@ const lock = createLock(redis, {
 });
 
 // PostgreSQL
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fences",
+});
 const lock = createLock(sql, {
   tableName: "app_locks", // Default: "syncguard_locks"
   fenceTableName: "app_fences", // Default: "syncguard_fence_counters"
@@ -160,7 +169,7 @@ const lock = createLock(db, {
 
 ::: warning Backend-Specific Setup
 
-- **PostgreSQL**: Requires indexes on `lock_id` and `expires_at_ms` columns. Tables are auto-created by default.
+- **PostgreSQL**: Call `setupSchema(sql)` once during initialization to create required tables and indexes.
 - **Firestore**: Requires a single-field ascending index on the `lockId` field. See [setup docs](https://kriasoft.com/syncguard/firestore#required-index).
   :::
 

@@ -17,16 +17,35 @@ import type { PostgresBackendOptions } from "./types.js";
  */
 
 /**
- * Creates distributed lock with PostgreSQL backend via postgres.js client
+ * Creates distributed lock with PostgreSQL backend via postgres.js client.
+ *
+ * IMPORTANT: Call setupSchema() once before creating locks to set up schema.
+ *
  * @param sql - postgres.js SQL instance
- * @param options - Table names, cleanup, and auto-create config
+ * @param options - Table names and cleanup config
  * @returns Auto-managed lock function (see: common/auto-lock.ts)
+ *
+ * @example
+ * ```typescript
+ * import postgres from 'postgres';
+ * import { createLock, setupSchema } from 'syncguard/postgres';
+ *
+ * const sql = postgres('postgresql://localhost:5432/myapp');
+ *
+ * // Setup schema (once, during initialization)
+ * await setupSchema(sql);
+ *
+ * // Create lock function (synchronous)
+ * const lock = createLock(sql);
+ *
+ * // Use lock
+ * await lock(async () => {
+ *   // Your code here
+ * }, { key: 'my-lock', ttlMs: 30_000 });
+ * ```
  */
-export async function createLock(
-  sql: Sql,
-  options: PostgresBackendOptions = {},
-) {
-  const backend = await createPostgresBackend(sql, options);
+export function createLock(sql: Sql, options: PostgresBackendOptions = {}) {
+  const backend = createPostgresBackend(sql, options);
   return <T>(
     fn: () => Promise<T> | T,
     config: LockConfig & { acquisition?: AcquisitionOptions },
@@ -37,6 +56,7 @@ export async function createLock(
 
 // Re-exports for custom backend implementations
 export { createPostgresBackend } from "./backend.js";
+export { setupSchema } from "./schema.js";
 export type {
   PostgresBackendOptions,
   PostgresCapabilities,

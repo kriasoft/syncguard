@@ -146,8 +146,25 @@ interface PostgresBackendOptions {
   tableName?: string; // Lock table, default: "syncguard_locks"
   fenceTableName?: string; // Fence counter table, default: "syncguard_fence_counters"
   cleanupInIsLocked?: boolean; // Enable cleanup in isLocked, default: false
-  autoCreateTables?: boolean; // Auto-create tables, default: true
 }
+```
+
+**Schema Setup**: Applications MUST call `setupSchema(sql, options?)` once during initialization to create required tables and indexes. This is separate from backend creation:
+
+```typescript
+import { setupSchema, createPostgresBackend } from "syncguard/postgres";
+
+// Setup phase (once, during initialization)
+await setupSchema(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
+
+// Usage phase (synchronous, can be called multiple times)
+const backend = createPostgresBackend(sql, {
+  tableName: "app_locks",
+  fenceTableName: "app_fence_counters",
+});
 ```
 
 **CRITICAL: Configuration Validation Requirements**
@@ -235,7 +252,7 @@ interface PostgresCapabilities extends BackendCapabilities {
 }
 
 const postgresBackend: LockBackend<PostgresCapabilities> =
-  await createPostgresBackend(sql);
+  createPostgresBackend(sql);
 ```
 
 ### Rationale & Notes
@@ -243,7 +260,7 @@ const postgresBackend: LockBackend<PostgresCapabilities> =
 **Ergonomic Usage**: PostgreSQL always provides fencing tokens with compile-time guarantees:
 
 ```typescript
-const backend = await createPostgresBackend(sql);
+const backend = createPostgresBackend(sql);
 const result = await backend.acquire({ key: "resource", ttlMs: 30000 });
 
 if (result.ok) {
@@ -755,7 +772,7 @@ return { ok: success };
   - B-tree index on `expires_at_ms` (required for efficient cleanup and monitoring queries)
 - **Cleanup Configuration**: Optional `cleanupInIsLocked: boolean` (default: `false`)
   - **CRITICAL**: Cleanup MUST ONLY delete lock records, NEVER fence counter records
-- **Auto-create tables**: Optional `autoCreateTables: boolean` (default: `true`)
+- **Schema Setup**: Applications MUST call `setupSchema(sql, options?)` once before using backend
 - **lookup Implementation**: Required - supports both key and lockId lookup patterns
 
 ### Backend Configuration Rationale & Notes
@@ -771,7 +788,7 @@ return { ok: success };
 
 **Why expires_at_ms index**: Enables efficient cleanup queries (`WHERE expires_at_ms < NOW()`) and monitoring queries (`COUNT(*) WHERE expires_at_ms > NOW()`). Without index, these operations require full table scans.
 
-**Why auto-create by default**: Developer convenience. Production deployments should pre-create tables via migrations.
+**Why separate setup function**: Proper separation of concerns. Schema operations are setup tasks that should be explicit and controllable, not hidden inside factory functions.
 
 ---
 
