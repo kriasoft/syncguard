@@ -3,6 +3,8 @@
 
 import type { Firestore } from "@google-cloud/firestore";
 import type { LockBackend } from "../common/backend.js";
+import { decorateAcquireResult } from "../common/disposable.js";
+import { normalizeAndValidateKey } from "../common/validation.js";
 import { createFirestoreConfig } from "./config.js";
 import { createAcquireOperation } from "./operations/acquire.js";
 import { createExtendOperation } from "./operations/extend.js";
@@ -39,17 +41,35 @@ export function createFirestoreBackend(
     timeAuthority: "client",
   };
 
-  return {
-    acquire: createAcquireOperation(
-      db,
-      locksCollection,
-      fenceCounterCollection,
-      config,
-    ),
-    release: createReleaseOperation(db, locksCollection, config),
-    extend: createExtendOperation(db, locksCollection, config),
+  // Create base operations
+  const acquireCore = createAcquireOperation(
+    db,
+    locksCollection,
+    fenceCounterCollection,
+    config,
+  );
+  const releaseOp = createReleaseOperation(db, locksCollection, config);
+  const extendOp = createExtendOperation(db, locksCollection, config);
+
+  // Create backend object with disposal support
+  const backend: LockBackend<FirestoreCapabilities> = {
+    acquire: async (opts) => {
+      const normalizedKey = normalizeAndValidateKey(opts.key);
+      const result = await acquireCore(opts);
+      return decorateAcquireResult(
+        backend,
+        result,
+        normalizedKey,
+        config.onReleaseError,
+        config.disposeTimeoutMs,
+      );
+    },
+    release: releaseOp,
+    extend: extendOp,
     isLocked: createIsLockedOperation(db, locksCollection, config),
     lookup: createLookupOperation(db, locksCollection, config),
     capabilities,
   };
+
+  return backend;
 }

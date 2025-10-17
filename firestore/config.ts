@@ -44,5 +44,7 @@ export function createFirestoreConfig(
     fenceCollection,
     cleanupInIsLocked:
       options.cleanupInIsLocked ?? FIRESTORE_DEFAULTS.cleanupInIsLocked,
+    onReleaseError: options.onReleaseError,
+    disposeTimeoutMs: options.disposeTimeoutMs,
   };
 }

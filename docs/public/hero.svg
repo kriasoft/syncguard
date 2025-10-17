@@ -1,0 +1,129 @@
+<svg viewBox="80 80 440 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for lock -->
+    <linearGradient id="lockGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3c8772;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2d6657;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Gradient for shield -->
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#5fa891;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#3c8772;stop-opacity:0.2" />
+    </linearGradient>
+
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle animations -->
+    <style>
+      @keyframes rotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 0.8; }
+      }
+      @keyframes orbit {
+        0% { transform: rotate(0deg) translateX(180px) rotate(0deg); }
+        100% { transform: rotate(360deg) translateX(180px) rotate(-360deg); }
+      }
+      .orbit-ring {
+        animation: rotate 20s linear infinite;
+        transform-origin: 300px 300px;
+      }
+      .node {
+        animation: pulse 2s ease-in-out infinite;
+      }
+      .node:nth-child(1) { animation-delay: 0s; }
+      .node:nth-child(2) { animation-delay: 0.5s; }
+      .node:nth-child(3) { animation-delay: 1s; }
+      .node:nth-child(4) { animation-delay: 1.5s; }
+
+      /* Theme adaptive colors */
+      @media (prefers-color-scheme: dark) {
+        .node-fill { fill: #2d3748; stroke: #4a5568; }
+        .orbit-stroke { stroke: #3c8772; }
+      }
+      @media (prefers-color-scheme: light) {
+        .node-fill { fill: #ffffff; stroke: #e2e8f0; }
+        .orbit-stroke { stroke: #3c8772; }
+      }
+    </style>
+  </defs>
+
+  <!-- Orbit ring -->
+  <g class="orbit-ring">
+    <circle cx="300" cy="300" r="180" fill="none" class="orbit-stroke" stroke-width="2" opacity="0.2" stroke-dasharray="10 5"/>
+  </g>
+
+  <!-- Orbiting nodes (services) -->
+  <g class="nodes">
+    <g class="node">
+      <circle cx="300" cy="120" r="28" class="node-fill" stroke-width="3" filter="url(#glow)"/>
+      <circle cx="300" cy="120" r="10" fill="#6366f1" opacity="0.6"/>
+    </g>
+
+    <g class="node">
+      <circle cx="480" cy="300" r="28" class="node-fill" stroke-width="3" filter="url(#glow)"/>
+      <circle cx="480" cy="300" r="10" fill="#ec4899" opacity="0.6"/>
+    </g>
+
+    <g class="node">
+      <circle cx="300" cy="480" r="28" class="node-fill" stroke-width="3" filter="url(#glow)"/>
+      <circle cx="300" cy="480" r="10" fill="#f59e0b" opacity="0.6"/>
+    </g>
+
+    <g class="node">
+      <circle cx="120" cy="300" r="28" class="node-fill" stroke-width="3" filter="url(#glow)"/>
+      <circle cx="120" cy="300" r="10" fill="#10b981" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- Connection lines to center -->
+  <g opacity="0.3">
+    <line x1="300" y1="120" x2="300" y2="300" class="orbit-stroke" stroke-width="2" stroke-dasharray="5 5"/>
+    <line x1="480" y1="300" x2="300" y2="300" class="orbit-stroke" stroke-width="2" stroke-dasharray="5 5"/>
+    <line x1="300" y1="480" x2="300" y2="300" class="orbit-stroke" stroke-width="2" stroke-dasharray="5 5"/>
+    <line x1="120" y1="300" x2="300" y2="300" class="orbit-stroke" stroke-width="2" stroke-dasharray="5 5"/>
+  </g>
+
+  <!-- Central lock with shield -->
+  <g filter="url(#glow)">
+    <!-- Shield background -->
+    <path d="M 300 200 L 360 220 L 360 300 Q 360 360 300 400 Q 240 360 240 300 L 240 220 Z"
+          fill="url(#shieldGradient)"/>
+
+    <!-- Shield outline -->
+    <path d="M 300 200 L 360 220 L 360 300 Q 360 360 300 400 Q 240 360 240 300 L 240 220 Z"
+          fill="none" stroke="url(#lockGradient)" stroke-width="3" opacity="0.6"/>
+
+    <!-- Lock body -->
+    <rect x="270" y="285" width="60" height="65" rx="8" fill="url(#lockGradient)"/>
+
+    <!-- Lock shackle -->
+    <path d="M 280 285 L 280 265 Q 280 240 300 240 Q 320 240 320 265 L 320 285"
+          fill="none" stroke="url(#lockGradient)" stroke-width="10" stroke-linecap="round"/>
+
+    <!-- Keyhole -->
+    <circle cx="300" cy="305" r="8" fill="#ffffff" opacity="0.9"/>
+    <path d="M 297 305 L 293 330 L 307 330 L 303 305" fill="#ffffff" opacity="0.9"/>
+
+    <!-- Decorative inner glow on lock -->
+    <rect x="272" y="287" width="56" height="61" rx="6" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.2"/>
+  </g>
+
+  <!-- Decorative elements -->
+  <g opacity="0.4">
+    <circle cx="300" cy="180" r="4" fill="url(#lockGradient)"/>
+    <circle cx="285" cy="185" r="3" fill="url(#lockGradient)"/>
+    <circle cx="315" cy="185" r="3" fill="url(#lockGradient)"/>
+  </g>
+</svg>

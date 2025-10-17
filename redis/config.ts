@@ -45,5 +45,7 @@ export function createRedisConfig(
     keyPrefix,
     cleanupInIsLocked:
       options.cleanupInIsLocked ?? REDIS_DEFAULTS.cleanupInIsLocked,
+    onReleaseError: options.onReleaseError,
+    disposeTimeoutMs: options.disposeTimeoutMs,
   };
 }

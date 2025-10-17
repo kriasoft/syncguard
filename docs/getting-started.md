@@ -98,19 +98,29 @@ That's it. The `lock()` function handles acquisition, retries, execution, and re
 Customize lock behavior with inline options:
 
 ```typescript
-await lock(workFn, {
-  key: "job:daily-report", // Required: unique lock identifier
-  ttlMs: 60000, // Lock expires after 60s (default: 30s)
-  timeoutMs: 10000, // Give up acquisition after 10s (default: 5s)
-  maxRetries: 20, // Retry up to 20 times on contention (default: 10)
-});
+await lock(
+  async () => {
+    // Your work function
+  },
+  {
+    key: "job:daily-report", // Required: unique lock identifier
+    ttlMs: 60000, // Lock expires after 60s (default: 30s)
+    acquisition: {
+      timeoutMs: 10000, // Give up acquisition after 10s (default: 5s)
+      maxRetries: 20, // Retry up to 20 times on contention (default: 10)
+      retryDelayMs: 100, // Initial retry delay (default: 100ms)
+      backoff: "exponential", // Backoff strategy (default: "exponential")
+      jitter: "equal", // Jitter strategy (default: "equal")
+    },
+  },
+);
 ```
 
 **Key guidelines**:
 
 - `ttlMs`: Short enough to minimize impact of crashed processes, long enough for your work
-- `timeoutMs`: How long to wait for contended locks before giving up
-- `maxRetries`: Higher = more patient under load; uses exponential backoff with jitter
+- `acquisition.timeoutMs`: How long to wait for contended locks before giving up
+- `acquisition.maxRetries`: Higher = more patient under load; uses exponential backoff with jitter
 
 Backend-specific config (collection names, key prefixes):
 
@@ -147,17 +157,44 @@ const lock = createLock(db, {
 
 ## Manual Lock Control
 
-For long-running tasks or custom retry logic, use the backend directly:
+For long-running tasks or custom retry logic, use the backend directly with automatic cleanup:
 
 ```typescript
 import { createRedisBackend } from "syncguard/redis";
 
 const backend = createRedisBackend(redis);
 
-// Acquire lock manually
+// Acquire lock with automatic cleanup (Node.js ≥20)
+{
+  await using lock = await backend.acquire({
+    key: "batch:daily-report",
+    ttlMs: 300000, // 5 minutes
+  });
+
+  if (lock.ok) {
+    // TypeScript narrows lock to include handle methods after ok check
+    const { fence } = lock;
+
+    await generateReport(fence);
+
+    // Extend lock for long-running tasks
+    await lock.extend(300000); // Another 5 minutes
+    await sendReportEmail();
+
+    // Lock automatically released here
+  } else {
+    console.log("Resource locked by another process");
+  }
+}
+```
+
+<details>
+<summary>For older runtimes (Node.js &lt;20), use try/finally</summary>
+
+```typescript
 const result = await backend.acquire({
   key: "batch:daily-report",
-  ttlMs: 300000, // 5 minutes
+  ttlMs: 300000,
 });
 
 if (result.ok) {
@@ -165,10 +202,9 @@ if (result.ok) {
     const { lockId, fence } = result;
     await generateReport(fence);
 
-    // Extend lock for long-running tasks
     const extended = await backend.extend({
       lockId,
-      ttlMs: 300000, // Another 5 minutes
+      ttlMs: 300000,
     });
 
     if (!extended.ok) {
@@ -182,6 +218,24 @@ if (result.ok) {
 } else {
   console.log("Resource locked by another process");
 }
+```
+
+</details>
+
+**Error handling for disposal**:
+
+SyncGuard provides a safe-by-default error handler that automatically logs disposal failures in development mode (`NODE_ENV !== 'production'`). In production, enable logging with `SYNCGUARD_DEBUG=true` or provide a custom `onReleaseError` callback:
+
+```typescript
+const backend = createRedisBackend(redis, {
+  onReleaseError: (error, context) => {
+    logger.error("Failed to release lock", {
+      error: error.message,
+      lockId: context.lockId,
+      key: context.key,
+    });
+  },
+});
 ```
 
 **Why manual mode?**

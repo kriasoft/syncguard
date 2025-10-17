@@ -57,12 +57,19 @@ const backend = createRedisBackend(redis, { keyPrefix: prefix });
 ### Lock Options
 
 ```ts
-await lock(workFn, {
-  key: "resource:123", // Required: unique identifier
-  ttlMs: 30000, // Lock duration (default: 30s)
-  timeoutMs: 5000, // Max acquisition wait (default: 5s)
-  maxRetries: 10, // Retry attempts (default: 10)
-});
+await lock(
+  async () => {
+    // Your work function
+  },
+  {
+    key: "resource:123", // Required: unique identifier
+    ttlMs: 30000, // Lock duration (default: 30s)
+    acquisition: {
+      timeoutMs: 5000, // Max acquisition wait (default: 5s)
+      maxRetries: 10, // Retry attempts (default: 10)
+    },
+  },
+);
 ```
 
 ## Performance

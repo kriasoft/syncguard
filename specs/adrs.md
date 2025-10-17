@@ -573,3 +573,147 @@ While this shouldn't happen in normal operation, defensive programming principle
 - **Implementation**: See JSDoc comments in `firestore/operations/*.ts` for detection patterns
 - **Testing**: Integration tests SHOULD verify duplicate handling
 - **Backward compatibility**: SHOULD requirement allows gradual adoption
+
+## ADR-015: Async RAII for Locks
+
+**Date:** 2025-10
+**Status:** Accepted
+
+**Context**: Lock management requires careful cleanup on all code paths—including early returns, exceptions, and normal completion. Manual cleanup patterns (`try/finally`) are error-prone and verbose. JavaScript's `await using` syntax (AsyncDisposable, Node.js ≥20) provides RAII (Resource Acquisition Is Initialization) for automatic cleanup, but integrating it with the existing lock API required design decisions around error handling, signal propagation, and state management.
+
+**Decision**: Integrate AsyncDisposable support into all backend `acquire()` results, providing automatic lock release on scope exit:
+
+- **Automatic disposal**: All `AcquireResult<C>` objects implement `Symbol.asyncDispose` for `await using` compatibility
+- **Two configuration patterns**: Backend-level callbacks for low-level API (`await using`), lock-level callbacks for high-level helper (`lock()`)
+- **Stateless handle design**: No local state tracking—delegate idempotency and ownership verification to backend
+- **Full signal support**: Handle methods (`release`, `extend`) accept optional `AbortSignal` for per-operation cancellation
+- **Error callback integration**: `onReleaseError` callback for disposal failures (never throws from disposal per spec)
+- **Type narrowing**: TypeScript's discriminated unions provide automatic narrowing after `if (lock.ok)` check
+
+**Rationale**:
+
+**Why AsyncDisposable integration:**
+
+- **Correctness guarantee**: Ensures cleanup on all code paths without manual try/finally
+- **Ergonomic API**: `await using` is concise and familiar to developers using modern JavaScript
+- **Error resilience**: Cleanup happens even when scope exits with exceptions
+- **Composable**: Works with both backend.acquire() (low-level) and lock() helper (high-level)
+
+**Why two configuration patterns:**
+
+- **Pattern A (backend-level)**: Configure `onReleaseError` once for all acquisitions—ideal for low-level `await using` API
+- **Pattern B (lock-level)**: Configure `onReleaseError` per-call—ideal for high-level `lock()` helper with fine-grained control
+- **Independence**: These serve different APIs, not meant to be mixed (choose based on usage pattern)
+- **No duplication**: Each pattern targets a specific use case
+
+**Why stateless handle design:**
+
+- **Race-free**: Eliminates potential race conditions from mutable `released` boolean flag
+- **Simpler code**: No local state to synchronize or reason about
+- **Trust backend**: Backend already provides atomic idempotency—don't duplicate checks
+- **Correctness over optimization**: Aligns with project principle; duplicate backend calls are rare and cheap
+
+**Why full signal support:**
+
+- **API consistency**: Handle methods mirror backend method signatures (all accept optional `signal`)
+- **Per-operation control**: Independent cancellation of different operations (release vs extend)
+- **Composability**: Enables advanced patterns like timeout-guarded releases
+- **Backward compatible**: Optional parameters don't break existing code
+
+**Why error callbacks never throw:**
+
+- **Disposal safety**: `Symbol.asyncDispose` must never throw per JavaScript spec
+- **Observable failures**: Callbacks provide visibility without disrupting cleanup
+- **Silent fallback**: Without callback, disposal errors are silently ignored (best-effort cleanup)
+
+**Why manual operations throw but disposal swallows:**
+
+- **API consistency**: `handle.release()` and `handle.extend()` behave identically to `backend.release()` and `backend.extend()` (both throw on system errors)
+- **RAII semantics**: Manual operations report errors for actionable handling; automatic disposal is best-effort cleanup
+- **Predictable behavior**: Users can rely on consistent error propagation across manual operations
+- **Safety**: System errors (network failures, auth errors) are visible and distinguishable from domain failures (lock not found)
+
+**Alternatives considered and rejected:**
+
+- **Implicit signal capture (Option B for Issue 1)**: Hidden state reduces flexibility and testability
+- **Mutable released flag with promise serialization (Option B for Issue 2)**: Over-engineering; adds complexity for marginal benefit
+- **Separate disposable wrapper type**: Extra API surface; violates "smallest possible API" principle
+- **Throwing from disposal**: Violates AsyncDisposable contract; masks original errors
+
+**Consequences**:
+
+- **Breaking changes**: None—AsyncDisposable is additive to existing API
+- **New exports**: `decorateAcquireResult()` and `acquireHandle()` in `common/disposable.ts`
+- **Backend integration**: All backends (Redis, Postgres, Firestore) call `decorateAcquireResult()` in acquire operations
+- **Type changes**: `AcquireResult<C>` includes `Symbol.asyncDispose` on both success and failure results
+- **Error handling contract**: Manual `release()` and `extend()` throw on system errors (consistent with backend API); only `Symbol.asyncDispose` swallows errors and routes to `onReleaseError` callback
+- **Documentation**: See interface.md Resource Management section for normative specification
+- **Test coverage**: 24 disposal unit tests, 18 integration tests across all backends
+- **Cross-references**: See `common/disposable.ts` for implementation, `specs/interface.md` for usage examples
+
+## ADR-016: Opt-In Disposal Timeout
+
+**Date:** 2025-10
+**Status:** Accepted
+
+**Context**: The `Symbol.asyncDispose` method in disposable lock handles calls `release()` without any timeout or AbortSignal. If a backend's release operation hangs (e.g., network latency in Firestore/Redis, slow PostgreSQL query under load), disposal could block indefinitely. While backend clients should have their own timeouts (Redis socket timeout, PostgreSQL statement_timeout, Firestore client timeout), there was no mechanism to enforce disposal-specific timeout behavior independent of general backend timeouts.
+
+This creates a potential inconsistency: manual `release()` supports `AbortSignal` for cancellation, but automatic disposal (via `await using`) doesn't, leading to different cancellation behavior between explicit and automatic cleanup.
+
+**Decision**: Add **opt-in** `disposeTimeoutMs` configuration with no default:
+
+- **Opt-in configuration**: New `disposeTimeoutMs` field in `BackendConfig` interface (optional, no default value)
+- **Timeout mechanism**: When configured, disposal creates internal `AbortController` with `setTimeout`, passes signal to `release()`
+- **Error handling**: Timeout errors flow through existing `onReleaseError` callback with normalized error context
+- **Backend-agnostic**: Applies uniformly to Redis, PostgreSQL, and Firestore backends
+- **Manual operations unaffected**: Timeout only applies to automatic disposal; manual `release()` uses caller-provided signal
+
+**Rationale**:
+
+**Why opt-in (no default):**
+
+- **Pragmatic**: Keeps default behavior simple (status quo), adds safety only when users need it
+- **Minimal API growth**: Single optional field in existing config interface
+- **Avoids false timeouts**: No risk of premature timeout in slow but valid operations
+- **User choice**: High-reliability environments can enable it; others rely on backend-level timeouts
+
+**Why timeout disposal specifically:**
+
+- **Responsiveness guarantee**: Prevents indefinite hangs on scope exit in RAII pattern
+- **Consistent with signal support**: Uses existing `AbortSignal` infrastructure from ADR-015
+- **Observable failures**: Timeout errors reported via `onReleaseError` callback for visibility
+- **Defense-in-depth**: Additional safety layer when backend client timeouts insufficient
+
+**Why not global signal approach:**
+
+- **Too complex**: Requires users to manage global signals, easy to forget
+- **No per-lock granularity**: Cannot configure different timeouts for different lock types
+- **Error handling burden**: If signal aborts, error handling is user-dependent, potentially unlogged
+
+**Why not status quo:**
+
+- **Safety concern**: Legitimate risk of hangs in distributed systems with unreliable networks
+- **Inconsistent behavior**: Manual `release()` has cancellation support, automatic disposal doesn't
+- **Operational risk**: Silent hangs reduce observability and reliability in production
+
+**Why minimal complexity:**
+
+- **Reuses existing infrastructure**: `AbortController`, `onReleaseError`, backend signal support
+- **No new abstractions**: Timeout is implementation detail of disposal, not exposed API
+- **Clear semantics**: Timeout = abort disposal after N milliseconds, report via callback
+
+**Alternatives considered and rejected:**
+
+- **Default timeout (e.g., 5s)**: Forces timeout behavior on all users; might cause false timeouts
+- **Global signal configuration**: Too complex for users to manage; no per-lock control
+- **Do nothing**: Ignores legitimate safety concerns in high-reliability systems
+
+**Consequences**:
+
+- **Breaking changes**: None—`disposeTimeoutMs` is optional with no default
+- **API addition**: Single field in `BackendConfig`, `RedisBackendOptions`, `PostgresBackendOptions`, `FirestoreBackendOptions`
+- **Implementation**: Updated `common/disposable.ts` to support timeout parameter, passed through backend `decorateAcquireResult()` calls
+- **Backend updates**: Redis, PostgreSQL, Firestore backends pass `config.disposeTimeoutMs` to `decorateAcquireResult()`
+- **Test coverage**: 5 new unit tests in `test/unit/disposable.test.ts` covering timeout behavior, signal handling, and error reporting
+- **Documentation**: JSDoc in `common/types.ts` explains opt-in nature, use cases, and recommends backend-level timeouts as primary approach
+- **Cross-references**: See `common/disposable.ts` for implementation, `common/types.ts` for configuration

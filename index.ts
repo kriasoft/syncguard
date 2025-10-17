@@ -32,11 +32,22 @@ export type {
   TelemetryOptions,
 } from "./common/types.js";
 
+// Resource Management (Async Disposal)
+
+export type {
+  AsyncLock,
+  DisposableLockHandle,
+  OnReleaseError,
+} from "./common/disposable.js";
+
+export { acquireHandle, decorateAcquireResult } from "./common/disposable.js";
+
 // Configuration Constants
 
 export {
   BACKEND_DEFAULTS,
   BACKEND_LIMITS,
+  FENCE_THRESHOLDS,
   LOCK_DEFAULTS,
   MAX_KEY_LENGTH_BYTES,
   RESERVE_BYTES,

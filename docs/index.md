@@ -5,7 +5,10 @@ layout: home
 hero:
   name: "SyncGuard"
   text: "Distributed locks that feel like local locks"
-  tagline: "One `await lock()` call to prevent race conditions across your services. TypeScript library with fencing tokens, auto-cleanup, and Redis/Firestore/PostgreSQL support."
+  tagline: "One `await lock()` call to prevent race conditions across your services. TypeScript library with fencing tokens, auto-cleanup, and bulletproof concurrency."
+  image:
+    src: /hero.svg
+    alt: SyncGuard - Distributed locking across microservices
   actions:
     - theme: brand
       text: What is SyncGuard?
@@ -30,7 +33,7 @@ features:
   - title: Smart Retries
     icon: 🔁
     details: Exponential backoff with jitter handles contention automatically. Configure max retries, timeout, and backoff strategy to match your needs.
-  - title: Developer Experience
+  - title: Production Ready
     icon: 🎯
-    details: Simple `await lock()` for auto-managed locks or manual control with acquire/release/extend. APIs designed to be hard to misuse.
+    details: Automatic cleanup via `await using`, comprehensive error handling, onReleaseError callbacks, and optional telemetry. Built-in observability for production systems.
 ---

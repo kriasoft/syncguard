@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { BackendCapabilities } from "../common/backend.js";
+import type { OnReleaseError } from "../common/disposable.js";
 
 /**
  * Firestore-specific backend capabilities
@@ -25,6 +26,10 @@ export interface FirestoreBackendOptions {
   fenceCollection?: string;
   /** Enable cleanup in isLocked operation (default: false) */
   cleanupInIsLocked?: boolean;
+  /** Callback for release errors during disposal (optional) */
+  onReleaseError?: OnReleaseError;
+  /** Timeout for automatic disposal operations in ms (optional) */
+  disposeTimeoutMs?: number;
 }
 
 /**
@@ -60,4 +65,6 @@ export interface FirestoreConfig {
   collection: string;
   fenceCollection: string;
   cleanupInIsLocked: boolean;
+  onReleaseError?: OnReleaseError;
+  disposeTimeoutMs?: number;
 }

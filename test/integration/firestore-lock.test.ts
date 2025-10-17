@@ -80,6 +80,9 @@ describe("Firestore Lock Integration Tests", () => {
       const fenceBatch = db.batch();
       fenceDocs.docs.forEach((doc) => fenceBatch.delete(doc.ref));
       if (!fenceDocs.empty) await fenceBatch.commit();
+
+      // Wait for Firestore operations to settle (prevents state leakage between tests)
+      await Bun.sleep(100);
     } catch (error) {
       const message = (error as Error).message;
       if (message.includes("already been terminated")) {
@@ -109,6 +112,9 @@ describe("Firestore Lock Integration Tests", () => {
       const fenceBatch = db.batch();
       fenceDocs.docs.forEach((doc) => fenceBatch.delete(doc.ref));
       if (!fenceDocs.empty) await fenceBatch.commit();
+
+      // Wait for Firestore operations to settle (prevents state leakage between tests)
+      await Bun.sleep(100);
     } catch (error) {
       const message = (error as Error).message;
       if (message.includes("already been terminated")) {

@@ -3,6 +3,8 @@
 
 import Redis from "ioredis";
 import type { LockBackend } from "../common/backend.js";
+import { decorateAcquireResult } from "../common/disposable.js";
+import { normalizeAndValidateKey } from "../common/validation.js";
 import { createRedisConfig } from "./config.js";
 import { createAcquireOperation } from "./operations/acquire.js";
 import { createExtendOperation } from "./operations/extend.js";
@@ -116,12 +118,30 @@ export function createRedisBackend(
     timeAuthority: "server",
   };
 
-  return {
-    acquire: createAcquireOperation(redisWithCommands, config),
-    release: createReleaseOperation(redisWithCommands, config),
-    extend: createExtendOperation(redisWithCommands, config),
+  // Create base operations
+  const acquireCore = createAcquireOperation(redisWithCommands, config);
+  const releaseOp = createReleaseOperation(redisWithCommands, config);
+  const extendOp = createExtendOperation(redisWithCommands, config);
+
+  // Create backend object with disposal support
+  const backend: LockBackend<RedisCapabilities> = {
+    acquire: async (opts) => {
+      const normalizedKey = normalizeAndValidateKey(opts.key);
+      const result = await acquireCore(opts);
+      return decorateAcquireResult(
+        backend,
+        result,
+        normalizedKey,
+        config.onReleaseError,
+        config.disposeTimeoutMs,
+      );
+    },
+    release: releaseOp,
+    extend: extendOp,
     isLocked: createIsLockedOperation(redisWithCommands, config),
     lookup: createLookupOperation(redisWithCommands, config),
     capabilities,
   };
+
+  return backend;
 }

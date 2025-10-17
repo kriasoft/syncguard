@@ -196,12 +196,19 @@ Create indexes for **both** tables if using custom names. See `postgres/schema.s
 ### Lock Options
 
 ```ts
-await lock(workFn, {
-  key: "resource:123", // Required: unique identifier
-  ttlMs: 30000, // Lock duration (default: 30s)
-  timeoutMs: 5000, // Max acquisition wait (default: 5s)
-  maxRetries: 10, // Retry attempts (default: 10)
-});
+await lock(
+  async () => {
+    // Your work function
+  },
+  {
+    key: "resource:123", // Required: unique identifier
+    ttlMs: 30000, // Lock duration (default: 30s)
+    acquisition: {
+      timeoutMs: 5000, // Max acquisition wait (default: 5s)
+      maxRetries: 10, // Retry attempts (default: 10)
+    },
+  },
+);
 ```
 
 ## Performance
@@ -465,12 +472,19 @@ Under high contention, PostgreSQL may serialize transactions:
 // SyncGuard automatically retries failed transactions
 // If you see frequent conflicts, adjust retry configuration:
 
-await lock(workFn, {
-  key: "resource:123",
-  maxRetries: 20, // Increase retries
-  retryDelayMs: 200, // Increase delay
-  timeoutMs: 10000, // Increase timeout
-});
+await lock(
+  async () => {
+    // Your work
+  },
+  {
+    key: "resource:123",
+    acquisition: {
+      maxRetries: 20, // Increase retries
+      retryDelayMs: 200, // Increase delay
+      timeoutMs: 10000, // Increase timeout
+    },
+  },
+);
 ```
 
 ### Key Length Limits
