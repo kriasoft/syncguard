@@ -84,23 +84,50 @@ await lock(
 );
 ```
 
-### Manual Lock Control
+### Manual Lock Control with Automatic Cleanup
+
+Use `await using` for automatic cleanup on all code paths (Node.js ≥20):
 
 ```typescript
 const backend = createRedisBackend(redis);
 
-// Acquire lock manually
+// Lock automatically released on scope exit
+{
+  await using lock = await backend.acquire({
+    key: "batch:daily-report",
+    ttlMs: 300000, // 5 minutes
+  });
+
+  if (lock.ok) {
+    // TypeScript narrows lock to include handle methods after ok check
+    const { fence } = lock; // Fencing token for stale lock protection
+
+    await generateDailyReport(fence);
+
+    // Extend lock for long-running tasks
+    await lock.extend(300000);
+    await sendReportEmail();
+
+    // Lock released automatically here
+  } else {
+    console.log("Resource is locked by another process");
+  }
+}
+```
+
+**For older runtimes (Node.js <20)**, use try/finally:
+
+```typescript
 const result = await backend.acquire({
   key: "batch:daily-report",
-  ttlMs: 300000, // 5 minutes
+  ttlMs: 300000,
 });
 
 if (result.ok) {
   try {
-    const { lockId, fence } = result; // Fencing token for stale lock protection
+    const { lockId, fence } = result;
     await generateDailyReport(fence);
 
-    // Extend lock for long-running tasks
     const extended = await backend.extend({ lockId, ttlMs: 300000 });
     if (!extended.ok) {
       throw new Error("Failed to extend lock");
@@ -114,6 +141,25 @@ if (result.ok) {
   console.log("Resource is locked by another process");
 }
 ```
+
+**Error callbacks** for disposal failures:
+
+```typescript
+const backend = createRedisBackend(redis, {
+  onReleaseError: (error, context) => {
+    logger.error("Failed to release lock", {
+      error,
+      lockId: context.lockId,
+      key: context.key,
+    });
+  },
+});
+
+// All acquisitions automatically use the error callback
+await using lock = await backend.acquire({ key: "resource", ttlMs: 30000 });
+```
+
+**Note:** SyncGuard provides a safe-by-default error handler that automatically logs disposal failures in development mode (`NODE_ENV !== 'production'`). In production, enable logging with `SYNCGUARD_DEBUG=true` or provide a custom `onReleaseError` callback integrated with your observability stack.
 
 ### Ownership Checking
 
@@ -134,12 +180,22 @@ if (info) {
 
 ```typescript
 // Basic lock options
-await lock(workFn, {
-  key: "resource:123", // Required: unique identifier
-  ttlMs: 30000, // Lock duration (default: 30s)
-  timeoutMs: 5000, // Max acquisition wait (default: 5s)
-  maxRetries: 10, // Retry attempts (default: 10)
-});
+await lock(
+  async () => {
+    // Your critical section
+  },
+  {
+    key: "resource:123", // Required: unique identifier
+    ttlMs: 30000, // Lock duration (default: 30s)
+    acquisition: {
+      timeoutMs: 5000, // Max acquisition wait (default: 5s)
+      maxRetries: 10, // Retry attempts (default: 10)
+      retryDelayMs: 100, // Initial retry delay (default: 100ms)
+      backoff: "exponential", // Backoff strategy: "exponential" | "fixed" (default: "exponential")
+      jitter: "equal", // Jitter strategy: "equal" | "full" | "none" (default: "equal")
+    },
+  },
+);
 ```
 
 ### Backend Configuration
@@ -236,7 +292,7 @@ const checkRateLimit = async (userId: string) => {
 
 - 🔒 **Bulletproof concurrency** - Atomic operations prevent race conditions
 - 🛡️ **Fencing tokens** - Monotonic counters protect against stale writes
-- 🧹 **Automatic cleanup** - TTL-based expiration, no manual cleanup needed
+- 🧹 **Automatic cleanup** - TTL-based expiration + `await using` (AsyncDisposable) support
 - 🔄 **Backend flexibility** - Redis (performance), PostgreSQL (zero overhead), or Firestore (serverless)
 - 🔁 **Smart retries** - Exponential backoff with jitter handles contention
 - 💙 **TypeScript-first** - Full type safety with compile-time guarantees

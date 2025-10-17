@@ -33,12 +33,19 @@ await lock(
 );
 
 // With configuration
-await lock(workFn, {
-  key: "job:daily-report",
-  ttlMs: 60000, // Lock expires after 60s
-  timeoutMs: 10000, // Give up acquisition after 10s
-  maxRetries: 20, // Retry up to 20 times
-});
+await lock(
+  async () => {
+    // Your work
+  },
+  {
+    key: "job:daily-report",
+    ttlMs: 60000, // Lock expires after 60s
+    acquisition: {
+      timeoutMs: 10000, // Give up acquisition after 10s
+      maxRetries: 20, // Retry up to 20 times
+    },
+  },
+);
 ```
 
 **Behavior:**
@@ -68,7 +75,12 @@ const lock = createLock(redis, {
   keyPrefix: "my-app", // Default: "syncguard"
 });
 
-await lock(workFn, { key: "resource:123" });
+await lock(
+  async () => {
+    // Your work
+  },
+  { key: "resource:123" },
+);
 ```
 
 ```typescript [PostgreSQL]
@@ -89,7 +101,12 @@ const lock = createLock(sql, {
   fenceTableName: "app_fence_counters", // Default: "syncguard_fence_counters"
 });
 
-await lock(workFn, { key: "resource:123" });
+await lock(
+  async () => {
+    // Your work
+  },
+  { key: "resource:123" },
+);
 ```
 
 ```typescript [Firestore]
@@ -102,7 +119,12 @@ const lock = createLock(db, {
   fenceCollection: "app_fences", // Default: "fence_counters"
 });
 
-await lock(workFn, { key: "resource:123" });
+await lock(
+  async () => {
+    // Your work
+  },
+  { key: "resource:123" },
+);
 ```
 
 :::
@@ -549,15 +571,22 @@ interface LockConfig {
 **Example:**
 
 ```typescript
-await lock(workFn, {
-  key: "job:daily-report",
-  ttlMs: 60000,
-  timeoutMs: 10000,
-  maxRetries: 20,
-  onReleaseError: (err, ctx) => {
-    console.error(`Failed to release ${ctx.key}:`, err);
+await lock(
+  async () => {
+    // Your work
   },
-});
+  {
+    key: "job:daily-report",
+    ttlMs: 60000,
+    acquisition: {
+      timeoutMs: 10000,
+      maxRetries: 20,
+    },
+    onReleaseError: (err, ctx) => {
+      console.error(`Failed to release ${ctx.key}:`, err);
+    },
+  },
+);
 ```
 
 **Fields:**
@@ -603,22 +632,32 @@ interface AcquisitionOptions {
 
 ```typescript
 // More patient (high contention tolerance)
-await lock(workFn, {
-  key: "hot-resource",
-  acquisition: {
-    maxRetries: 20,
-    timeoutMs: 10000,
+await lock(
+  async () => {
+    // Your work
   },
-});
+  {
+    key: "hot-resource",
+    acquisition: {
+      maxRetries: 20,
+      timeoutMs: 10000,
+    },
+  },
+);
 
 // Fail fast
-await lock(workFn, {
-  key: "quick-check",
-  acquisition: {
-    maxRetries: 3,
-    timeoutMs: 1000,
+await lock(
+  async () => {
+    // Your work
   },
-});
+  {
+    key: "quick-check",
+    acquisition: {
+      maxRetries: 3,
+      timeoutMs: 1000,
+    },
+  },
+);
 ```
 
 See [Core Concepts](/core-concepts#retry-strategy) for retry behavior details.
@@ -883,7 +922,12 @@ class LockError extends Error {
 import { LockError } from "syncguard";
 
 try {
-  await lock(workFn, { key: "resource:123" });
+  await lock(
+    async () => {
+      // Your work
+    },
+    { key: "resource:123" },
+  );
 } catch (error) {
   if (error instanceof LockError) {
     console.error(`[${error.code}] ${error.message}`);
@@ -1132,6 +1176,26 @@ const LOCK_DEFAULTS = {
   jitter: "equal",
 } as const;
 
+// Fence token overflow thresholds
+const FENCE_THRESHOLDS = {
+  MAX: "900000000000000", // 9×10¹⁴ - hard limit
+  WARN: "090000000000000", // 9×10¹³ - warning threshold
+} as const;
+
+// Backend storage limits (for custom backends)
+const BACKEND_LIMITS = {
+  REDIS: 1000, // bytes
+  POSTGRES: 1700, // bytes
+  FIRESTORE: 1500, // bytes
+} as const;
+
+// Reserved bytes for derived keys (for custom backends)
+const RESERVE_BYTES = {
+  REDIS: 26, // ":id:" + lockId
+  POSTGRES: 0, // separate tables
+  FIRESTORE: 0, // independent document IDs
+} as const;
+
 // Key validation
 const MAX_KEY_LENGTH_BYTES = 512;
 ```
@@ -1139,10 +1203,21 @@ const MAX_KEY_LENGTH_BYTES = 512;
 **Usage:**
 
 ```typescript
-import { BACKEND_DEFAULTS, MAX_KEY_LENGTH_BYTES } from "syncguard";
+import {
+  BACKEND_DEFAULTS,
+  BACKEND_LIMITS,
+  FENCE_THRESHOLDS,
+  MAX_KEY_LENGTH_BYTES,
+  RESERVE_BYTES,
+} from "syncguard";
 
 console.log(BACKEND_DEFAULTS.ttlMs); // 30000
+console.log(FENCE_THRESHOLDS.MAX); // "900000000000000"
 console.log(MAX_KEY_LENGTH_BYTES); // 512
+
+// For custom backend implementations
+console.log(BACKEND_LIMITS.REDIS); // 1000
+console.log(RESERVE_BYTES.REDIS); // 26
 ```
 
 ::: info Internal Constant

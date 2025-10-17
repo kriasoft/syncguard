@@ -390,6 +390,57 @@ export type ExtendResult =
 
 ---
 
+## Resource Management (Optional)
+
+Acquire results MAY implement `AsyncDisposable` for automatic cleanup with `await using` syntax (Node.js ≥20).
+
+### Requirements
+
+- Disposal MUST be idempotent (safe to call multiple times)
+- Disposal MUST NOT throw (errors routed to optional `onReleaseError` callback)
+- When `ok: true`: disposal delegates to `release({ lockId })`
+- When `ok: false`: disposal is a no-op
+
+### Handle Methods
+
+Successful acquisitions (`ok: true`) provide handle methods for manual control:
+
+```typescript
+interface DisposableLockHandle {
+  release(signal?: AbortSignal): Promise<ReleaseResult>;
+  extend(ttlMs: number, signal?: AbortSignal): Promise<ExtendResult>;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+```
+
+- Both `release()` and `extend()` accept optional `AbortSignal` for operation cancellation
+- Signal parameters maintain API consistency with backend methods (`release(opts: LockOp)`, `extend(opts: LockOp & { ttlMs })`)
+- Methods forward signals to backend operations for responsive cancellation
+- Per-operation signal control enables independent cancellation of different operations
+
+### Configuration
+
+Error callbacks can be configured at two levels:
+
+- **Backend-level**: `createBackend({ onReleaseError })` - applies to `await using` disposal
+- **Lock-level**: `lock({ onReleaseError })` - applies to `lock()` helper cleanup
+
+These are independent configurations for different usage patterns. See `common/disposable.ts` for usage examples.
+
+### Runtime Support
+
+`await using` requires Node.js ≥20. For older runtimes, use `try/finally` patterns.
+
+### Rationale & Notes
+
+**Why optional**: Additive feature that doesn't change existing contracts. Enhances DX without breaking compatibility.
+
+**Why dual configuration**: Backend-level suits low-level `await using` API; lock-level suits high-level `lock()` helper. Users typically choose one pattern.
+
+**Why idempotent**: Safe disposal on all code paths, including early returns and exceptions.
+
+---
+
 ## Fence Token Format
 
 ### Requirements
@@ -749,6 +800,222 @@ export class LockError extends Error {
   }
 }
 ```
+
+### Error Handling Patterns
+
+SyncGuard provides multiple complementary mechanisms for error handling. Choose the patterns that match your application's needs.
+
+#### Pattern 1: Simple Error Handling
+
+For basic applications, use try/catch for acquisition errors and the `onReleaseError` callback for disposal errors:
+
+```typescript
+try {
+  await using lock = await backend.lock("key", {
+    onReleaseError: (err, ctx) => {
+      logger.error("Failed to release lock", {
+        error: err,
+        lockId: ctx.lockId,
+        key: ctx.key,
+        source: ctx.source,
+      });
+    },
+  });
+  // Critical section
+} catch (err) {
+  if (err instanceof LockError) {
+    logger.error("Failed to acquire lock", {
+      code: err.code,
+      message: err.message,
+    });
+  }
+  throw err;
+}
+```
+
+**⚠️ Important: Disposal Errors and `using`/`await using`**
+
+When using `using` or `await using`, disposal errors (including timeouts and cleanup failures) are routed to the `onReleaseError` callback. The disposal process itself never throws to avoid disrupting your application's control flow.
+
+**Default Error Handling Behavior (NEW):**
+
+SyncGuard now provides a **safe-by-default** error handler that prevents silent disposal failures:
+
+- **Development** (`NODE_ENV !== 'production'`): Disposal errors are logged to `console.error`
+- **Production**: Silent by default to avoid log noise; enable via `SYNCGUARD_DEBUG=true` environment variable
+- **Security**: Default logs omit sensitive data (key, lockId) to prevent accidental PII exposure
+
+```typescript
+// Default behavior - errors are observable without explicit callback
+await using lock = await backend.acquire({ key, ttlMs });
+// Development: Disposal errors logged to console.error
+// Production: Silent unless SYNCGUARD_DEBUG=true
+
+// Recommended: Provide custom callback in production for proper observability
+await using lock = await backend.lock("key", {
+  onReleaseError: (err, ctx) => {
+    // This callback receives:
+    // - Release failures during disposal
+    // - Timeout errors (if disposeTimeoutMs configured)
+    // - Network errors during cleanup
+    logger.error("Disposal failed", {
+      error: err.message,
+      lockId: ctx.lockId,
+      key: ctx.key,
+      source: ctx.source,
+    });
+    metrics.increment("syncguard.disposal.error", { source: ctx.source });
+  },
+});
+// If disposal fails, onReleaseError is called but this code continues normally
+```
+
+**Production Best Practice:** Always configure a custom `onReleaseError` callback integrated with your logging and metrics infrastructure. The default callback is a safety net for development and should not be relied upon in production systems.
+
+#### Pattern 2: Centralized Observability with Telemetry
+
+For production systems, wrap your backend with `withTelemetry()` to capture all lock operations in a centralized monitoring system:
+
+```typescript
+import { withTelemetry } from "syncguard/common";
+
+const backend = withTelemetry(redisBackend, {
+  onEvent: (event) => {
+    // Send to your metrics/logging system
+    metrics.recordLockOperation(event.type, event.result);
+
+    if (event.result === "fail") {
+      logger.warn("Lock operation failed", {
+        operation: event.type,
+        reason: event.reason,
+        keyHash: event.keyHash,
+        lockIdHash: event.lockIdHash,
+      });
+    }
+  },
+  includeRaw: false, // Only emit sanitized hashes (default)
+});
+
+// All operations are now automatically instrumented
+await using lock = await backend.lock("key", {
+  onReleaseError: globalErrorHandler,
+});
+```
+
+**Telemetry captures all operations with zero overhead when disabled.**
+
+#### Pattern 3: Global Error Handler
+
+Define a reusable error handler for consistent error logging across your application:
+
+```typescript
+// Global error handler
+const globalErrorHandler: OnReleaseError = (err, ctx) => {
+  logger.error("Lock release failed", {
+    error: err.message,
+    code: err instanceof LockError ? err.code : "Unknown",
+    lockId: ctx.lockId,
+    key: ctx.key,
+    source: ctx.source,
+  });
+
+  // Emit metric
+  metrics.increment("lock.release.error", {
+    source: ctx.source,
+    code: err instanceof LockError ? err.code : "unknown",
+  });
+};
+
+// Use across your application
+const backend = createRedisBackend(redis, {
+  onReleaseError: globalErrorHandler,
+});
+
+// Or per-lock basis
+await using lock = await backend.lock("key", {
+  onReleaseError: globalErrorHandler,
+});
+```
+
+#### Pattern 4: Manual Control with Result Checking
+
+For fine-grained control, use the manual API and check result objects:
+
+```typescript
+const result = await backend.acquire({ key: "resource:123", ttlMs: 30000 });
+
+if (!result.ok) {
+  // Handle contention
+  logger.warn("Lock contention", {
+    key: "resource:123",
+    reason: result.reason,
+  });
+  return { status: "retry-later" };
+}
+
+try {
+  // Critical section
+  await processResource();
+} finally {
+  const releaseResult = await backend.release({ lockId: result.lockId });
+  if (!releaseResult.ok) {
+    logger.warn("Release failed - lock was absent", { lockId: result.lockId });
+  }
+}
+```
+
+#### Disposal Timeout Behavior
+
+Configure `disposeTimeoutMs` at the backend level to abort slow disposal operations:
+
+```typescript
+const backend = createRedisBackend(redis, {
+  disposeTimeoutMs: 5000, // Abort disposal after 5 seconds
+  onReleaseError: (err, ctx) => {
+    if (err instanceof LockError && err.code === "NetworkTimeout") {
+      logger.error("Disposal timeout exceeded", {
+        timeoutMs: 5000,
+        lockId: ctx.lockId,
+      });
+    }
+  },
+});
+
+await using lock = await backend.lock("key");
+// If disposal takes >5s, it's aborted and onReleaseError is called
+```
+
+**Note:** Most applications should rely on backend client timeout settings. Only use `disposeTimeoutMs` for disposal-specific timeout behavior.
+
+#### Error Handling Decision Matrix
+
+| Use Case              | Recommended Pattern                    | Why                                                    |
+| --------------------- | -------------------------------------- | ------------------------------------------------------ |
+| Simple application    | Pattern 1 (try/catch + onReleaseError) | Minimal setup, covers all error paths                  |
+| Production monitoring | Pattern 2 (withTelemetry)              | Centralized observability, zero overhead when disabled |
+| Multiple lock sites   | Pattern 3 (global handler)             | Consistent error handling across codebase              |
+| Fine-grained control  | Pattern 4 (manual API)                 | Explicit result checking, no implicit behavior         |
+| High reliability      | Pattern 2 + Pattern 3                  | Telemetry for monitoring + global handler for errors   |
+
+### Troubleshooting Guide
+
+**Not seeing disposal errors?**
+
+- ✅ Check that `onReleaseError` is configured (backend-level or lock-level)
+- ✅ Verify the callback is actually being invoked (add console.log)
+- ✅ Remember: `ok: false` results are normal (lock expired) - only system errors trigger callback
+
+**Disposal taking too long?**
+
+- ✅ Configure `disposeTimeoutMs` at backend level
+- ✅ Check backend client timeout settings (Redis socket timeout, PostgreSQL query timeout)
+- ✅ Monitor network latency to backend service
+
+**Want to see all lock activity?**
+
+- ✅ Use `withTelemetry()` to wrap your backend
+- ✅ Configure `onEvent` callback to send to your logging/metrics system
+- ✅ Enable `includeRaw: true` only for debugging (exposes sensitive identifiers)
 
 ### Centralized Error Mapping
 

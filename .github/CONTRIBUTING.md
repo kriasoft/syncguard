@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 - **Bun**: Install from [bun.sh](https://bun.sh)
 - **Docker** (for integration tests): Any recent version
 - **PostgreSQL** (for integration tests): 14+ running on localhost:5432
-- **Node.js**: 18+ (Bun handles this, but good to have)
+- **Node.js**: 20+ (Bun handles this, but good to have)
 
 ## Quick Start
 

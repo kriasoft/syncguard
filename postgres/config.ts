@@ -53,5 +53,7 @@ export function createPostgresConfig(
     tableName,
     fenceTableName,
     cleanupInIsLocked,
+    onReleaseError: options.onReleaseError,
+    disposeTimeoutMs: options.disposeTimeoutMs,
   };
 }

@@ -23,13 +23,15 @@ await lock(
   { key: "resource:123" },
 );
 
-// Manual lifecycle control
-const result = await backend.acquire({ key: "resource:123", ttlMs: 30000 });
-if (result.ok) {
-  try {
+// Manual lifecycle control with automatic cleanup (Node.js ≥20)
+{
+  await using lock = await backend.acquire({
+    key: "resource:123",
+    ttlMs: 30000,
+  });
+  if (lock.ok) {
     // Execute phase
-  } finally {
-    await backend.release({ lockId: result.lockId });
+    // Lock automatically released on scope exit
   }
 }
 ```
@@ -123,10 +125,20 @@ Locks expire automatically after `ttlMs` milliseconds. This prevents orphaned lo
 
 ```typescript
 // Short critical sections (default: 30s)
-await lock(workFn, { key: "quick-task", ttlMs: 30000 });
+await lock(
+  async () => {
+    // Your work
+  },
+  { key: "quick-task", ttlMs: 30000 },
+);
 
 // Long-running batch jobs
-await lock(workFn, { key: "daily-report", ttlMs: 300000 }); // 5 minutes
+await lock(
+  async () => {
+    // Your work
+  },
+  { key: "daily-report", ttlMs: 300000 },
+); // 5 minutes
 ```
 
 **Guidelines**:
@@ -138,24 +150,22 @@ await lock(workFn, { key: "daily-report", ttlMs: 300000 }); // 5 minutes
 **Extending locks** (for work that takes longer than expected):
 
 ```typescript
-const result = await backend.acquire({ key: "batch:report", ttlMs: 60000 });
-if (result.ok) {
-  try {
+// With automatic cleanup (Node.js ≥20)
+{
+  await using lock = await backend.acquire({
+    key: "batch:report",
+    ttlMs: 60000,
+  });
+
+  if (lock.ok) {
+    // TypeScript narrows lock to include handle methods after ok check
     await processFirstBatch();
 
     // Extend lock before it expires
-    const extended = await backend.extend({
-      lockId: result.lockId,
-      ttlMs: 60000, // Reset to 60s from now
-    });
-
-    if (!extended.ok) {
-      throw new Error("Lost lock ownership");
-    }
-
+    await lock.extend(60000); // Reset to 60s from now
     await processSecondBatch();
-  } finally {
-    await backend.release({ lockId: result.lockId });
+
+    // Lock automatically released
   }
 }
 ```
@@ -167,25 +177,27 @@ if (result.ok) {
 **Heartbeat pattern** (for very long-running work):
 
 ```typescript
-const result = await backend.acquire({ key: "long-task", ttlMs: 60000 });
-if (!result.ok) throw new Error("Failed to acquire lock");
+{
+  await using lock = await backend.acquire({ key: "long-task", ttlMs: 60000 });
+  if (!lock.ok) throw new Error("Failed to acquire lock");
 
-const { lockId } = result;
+  // TypeScript narrows lock to include handle methods after ok check
 
-// Extend every 30s (half the TTL)
-const heartbeat = setInterval(async () => {
-  const extended = await backend.extend({ lockId, ttlMs: 60000 });
-  if (!extended.ok) {
+  // Extend every 30s (half the TTL)
+  const heartbeat = setInterval(async () => {
+    const extended = await lock.extend(60000);
+    if (!extended.ok) {
+      clearInterval(heartbeat);
+      throw new Error("Lost lock ownership");
+    }
+  }, 30000);
+
+  try {
+    await doLongRunningWork();
+  } finally {
     clearInterval(heartbeat);
-    throw new Error("Lost lock ownership");
+    // Lock automatically released
   }
-}, 30000);
-
-try {
-  await doLongRunningWork();
-} finally {
-  clearInterval(heartbeat);
-  await backend.release({ lockId });
 }
 ```
 
@@ -196,12 +208,19 @@ When locks are contended, the `lock()` helper retries automatically using expone
 **Default retry behavior**:
 
 ```typescript
-await lock(workFn, {
-  key: "resource:123",
-  maxRetries: 10, // Try up to 10 times (default)
-  retryDelayMs: 100, // Start with 100ms delay (default)
-  timeoutMs: 5000, // Give up after 5s total (default)
-});
+await lock(
+  async () => {
+    // Your work function
+  },
+  {
+    key: "resource:123",
+    acquisition: {
+      maxRetries: 10, // Try up to 10 times (default)
+      retryDelayMs: 100, // Start with 100ms delay (default)
+      timeoutMs: 5000, // Give up after 5s total (default)
+    },
+  },
+);
 ```
 
 **How it works**:
@@ -222,18 +241,32 @@ await lock(workFn, {
 
 ```typescript
 // More patient (higher contention tolerance)
-await lock(workFn, {
-  key: "hot-resource",
-  maxRetries: 20,
-  timeoutMs: 10000,
-});
+await lock(
+  async () => {
+    // Your work
+  },
+  {
+    key: "hot-resource",
+    acquisition: {
+      maxRetries: 20,
+      timeoutMs: 10000,
+    },
+  },
+);
 
 // Less patient (fail fast)
-await lock(workFn, {
-  key: "quick-check",
-  maxRetries: 3,
-  timeoutMs: 1000,
-});
+await lock(
+  async () => {
+    // Your work
+  },
+  {
+    key: "quick-check",
+    acquisition: {
+      maxRetries: 3,
+      timeoutMs: 1000,
+    },
+  },
+);
 
 // No retries (single attempt)
 const result = await backend.acquire({ key: "resource:123", ttlMs: 30000 });
@@ -246,7 +279,12 @@ if (!result.ok) {
 
 ```typescript
 try {
-  await lock(workFn, { key: "resource:123" });
+  await lock(
+    async () => {
+      // Your work
+    },
+    { key: "resource:123" },
+  );
 } catch (error) {
   if (error instanceof LockError && error.code === "AcquisitionTimeout") {
     // Exceeded timeoutMs after all retries

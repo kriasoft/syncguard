@@ -13,6 +13,7 @@ export { createAutoLock, lock } from "./auto-lock.js";
 export * from "./config.js";
 export * from "./constants.js";
 export * from "./crypto.js";
+export * from "./disposable.js";
 export * from "./errors.js";
 export * from "./helpers.js";
 export * from "./telemetry.js";

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { BackendCapabilities } from "../common/backend.js";
+import type { OnReleaseError } from "../common/disposable.js";
 
 /**
  * Redis-specific backend capabilities
@@ -23,6 +24,10 @@ export interface RedisBackendOptions {
   keyPrefix?: string;
   /** Enable cleanup in isLocked operation (default: false) */
   cleanupInIsLocked?: boolean;
+  /** Callback for release errors during disposal (optional) */
+  onReleaseError?: OnReleaseError;
+  /** Timeout for automatic disposal operations in ms (optional) */
+  disposeTimeoutMs?: number;
 }
 
 /**
@@ -47,4 +52,6 @@ export interface LockData {
 export interface RedisConfig {
   keyPrefix: string;
   cleanupInIsLocked: boolean;
+  onReleaseError?: OnReleaseError;
+  disposeTimeoutMs?: number;
 }

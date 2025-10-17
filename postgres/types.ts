@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { BackendCapabilities } from "../common/backend.js";
+import type { OnReleaseError } from "../common/disposable.js";
 
 /**
  * PostgreSQL backend capabilities with server-side time authority.
@@ -33,6 +34,16 @@ export interface PostgresBackendOptions {
    * @default false
    */
   cleanupInIsLocked?: boolean;
+
+  /**
+   * Callback for release errors during disposal (optional)
+   */
+  onReleaseError?: OnReleaseError;
+
+  /**
+   * Timeout for automatic disposal operations in ms (optional)
+   */
+  disposeTimeoutMs?: number;
 }
 
 /**
@@ -42,6 +53,8 @@ export interface PostgresConfig {
   tableName: string;
   fenceTableName: string;
   cleanupInIsLocked: boolean;
+  onReleaseError?: OnReleaseError;
+  disposeTimeoutMs?: number;
 }
 
 /**

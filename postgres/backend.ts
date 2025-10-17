@@ -3,6 +3,8 @@
 
 import type { Sql } from "postgres";
 import type { LockBackend } from "../common/backend.js";
+import { decorateAcquireResult } from "../common/disposable.js";
+import { normalizeAndValidateKey } from "../common/validation.js";
 import { createPostgresConfig } from "./config.js";
 import {
   createAcquireOperation,
@@ -57,12 +59,30 @@ export function createPostgresBackend(
     timeAuthority: "server",
   };
 
-  return {
-    acquire: createAcquireOperation(sql, config),
-    release: createReleaseOperation(sql, config),
-    extend: createExtendOperation(sql, config),
+  // Create base operations
+  const acquireCore = createAcquireOperation(sql, config);
+  const releaseOp = createReleaseOperation(sql, config);
+  const extendOp = createExtendOperation(sql, config);
+
+  // Create backend object with disposal support
+  const backend: LockBackend<PostgresCapabilities> = {
+    acquire: async (opts) => {
+      const normalizedKey = normalizeAndValidateKey(opts.key);
+      const result = await acquireCore(opts);
+      return decorateAcquireResult(
+        backend,
+        result,
+        normalizedKey,
+        config.onReleaseError,
+        config.disposeTimeoutMs,
+      );
+    },
+    release: releaseOp,
+    extend: extendOp,
     isLocked: createIsLockedOperation(sql, config),
     lookup: createLookupOperation(sql, config),
     capabilities,
   };
+
+  return backend;
 }

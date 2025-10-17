@@ -9,8 +9,39 @@ import type {
   BackendCapabilities,
   LockBackend,
   LockConfig,
+  OnReleaseError,
 } from "./types.js";
 import { normalizeAndValidateKey } from "./validation.js";
+
+/**
+ * Default error handler for disposal failures in lock() helper.
+ * Provides safe-by-default observability without requiring user configuration.
+ *
+ * **Behavior**:
+ * - Development (NODE_ENV !== 'production'): Logs all disposal errors to console.error
+ * - Production: Silent by default, opt-in via SYNCGUARD_DEBUG=true environment variable
+ * - Security: Omits sensitive context (key, lockId) from logs by default
+ *
+ * **Note**: This is shared with the disposable.ts default handler for consistency.
+ *
+ * @see common/disposable.ts - Full documentation of default handler behavior
+ */
+const defaultDisposalErrorHandler: OnReleaseError = (err, ctx) => {
+  // Only log in development or when explicitly enabled via env var
+  const shouldLog =
+    process.env.NODE_ENV !== "production" ||
+    process.env.SYNCGUARD_DEBUG === "true";
+
+  if (shouldLog) {
+    console.error("[SyncGuard] Lock disposal failed:", {
+      error: err.message,
+      errorName: err.name,
+      source: ctx.source,
+      // Omit key and lockId to avoid leaking sensitive data in logs
+      // Users should provide custom callback for full context
+    });
+  }
+};
 
 /**
  * Auto-managed lock with retry logic for acquisition contention.
@@ -209,13 +240,28 @@ export async function lock<T, C extends BackendCapabilities>(
     try {
       await backend.release({ lockId, signal: config.signal });
     } catch (releaseError) {
-      if (config.onReleaseError) {
-        const error =
-          releaseError instanceof Error
-            ? releaseError
-            : new Error(String(releaseError));
+      // Always notify callback of disposal failure (uses default if not configured)
+      // This ensures consistent observability across low-level and high-level APIs
+      const errorHandler = config.onReleaseError ?? defaultDisposalErrorHandler;
 
-        config.onReleaseError(error, { lockId, key: normalizedKey });
+      try {
+        // Normalize to Error instance and preserve original for debugging
+        let normalizedError: Error;
+        if (releaseError instanceof Error) {
+          normalizedError = releaseError;
+        } else {
+          normalizedError = new Error(String(releaseError));
+          // Preserve original error for debugging
+          (normalizedError as any).originalError = releaseError;
+        }
+
+        errorHandler(normalizedError, {
+          lockId,
+          key: normalizedKey,
+          source: "disposal", // Automatic cleanup, not manual
+        });
+      } catch {
+        // Swallow callback errors - user's callback is responsible for safe error handling
       }
       // Swallow release errors: TTL cleanup handles orphaned locks
     }
