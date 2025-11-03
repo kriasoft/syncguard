@@ -57,6 +57,21 @@
  * **Note**: These are independent configurations for different usage patterns.
  * Choose the pattern that matches your API usage - you typically won't mix them.
  *
+ * ## Disposal Timeout Behavior
+ *
+ * When `disposeTimeoutMs` is configured, Symbol.asyncDispose races the release operation
+ * against a hard ceiling timer. If timeout elapses before release completes:
+ * - AbortSignal is triggered to signal cancellation to the backend
+ * - Disposal returns immediately (Symbol.asyncDispose never blocks)
+ * - Backend-specific behavior depends on signal handling:
+ *   - Redis/PostgreSQL: Network socket timeouts provide additional safety
+ *   - Firestore: Note that AbortSignal cannot interrupt in-flight gRPC calls; timeout
+ *     signals cancellation intent but may not stop the RPC. The in-flight call may
+ *     continue in the background. Timeout errors are routed to onReleaseError for observability.
+ *
+ * **Important**: disposeTimeoutMs bounds the async disposal wait time, not the actual
+ * backend cleanup. Use for responsiveness guarantees in high-reliability contexts.
+ *
  * @see specs/interface.md#resource-management - Normative specification
  * @see specs/adrs.md#adr-015-async-raii-for-locks - ADR-015: Async RAII for Locks
  * @see specs/adrs.md#adr-016-opt-in-disposal-timeout - ADR-016: Opt-In Disposal Timeout
@@ -262,44 +277,13 @@ export function createDisposableHandle<C extends BackendCapabilities>(
       // First disposal attempt: create and store promise
       state = "disposing";
       disposePromise = (async () => {
-        try {
-          // Apply timeout if configured
-          // Note: Timeout only aborts the signal; if the backend doesn't respect
-          // AbortSignal, the operation may still hang. Backends should implement
-          // proper signal handling for timeout to be effective.
-          if (typeof disposeTimeoutMs === "number" && disposeTimeoutMs > 0) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(
-              () => controller.abort(),
-              disposeTimeoutMs,
-            );
-            try {
-              await backend.release({
-                lockId: result.lockId,
-                signal: controller.signal,
-              });
-            } finally {
-              clearTimeout(timeoutId);
-            }
-          } else {
-            await backend.release({ lockId: result.lockId });
-          }
-          // Success - mark as disposed
-          state = "disposed";
-        } catch (error) {
-          // Disposal failed - mark as disposed anyway (at-most-once semantics)
-          state = "disposed";
-
-          // Never throw from disposal per AsyncDisposable spec
-          // Always notify callback of disposal failure (uses default if not configured)
+        const notifyDisposalError = (error: unknown) => {
           try {
-            // Normalize to Error instance and preserve original for debugging
             let normalizedError: Error;
             if (error instanceof Error) {
               normalizedError = error;
             } else {
               normalizedError = new Error(String(error));
-              // Preserve original error for debugging
               (normalizedError as any).originalError = error;
             }
 
@@ -311,7 +295,81 @@ export function createDisposableHandle<C extends BackendCapabilities>(
           } catch {
             // Swallow callback errors - user's callback is responsible for safe error handling
           }
-          // Error is swallowed - disposal is best-effort cleanup
+        };
+
+        try {
+          // Race release against timeout if configured.
+          // Hard ceiling: if timeout elapses, resolve disposal rather than hanging.
+          // This ensures Symbol.asyncDispose never blocks indefinitely.
+          // Note: Backend release may continue in background; timeout doesn't abort gRPC calls,
+          // only signals cancellation. Backends must respect AbortSignal to honor timeout.
+          if (typeof disposeTimeoutMs === "number" && disposeTimeoutMs > 0) {
+            const controller = new AbortController();
+
+            type ReleaseOutcome =
+              | { kind: "release-ok" }
+              | { kind: "release-error"; error: unknown };
+            type TimeoutOutcome = { kind: "timeout" };
+
+            // Wrap release in outcome object so Promise.race never rejects.
+            const releaseOutcome = (async (): Promise<ReleaseOutcome> => {
+              try {
+                await backend.release({
+                  lockId: result.lockId,
+                  signal: controller.signal,
+                });
+                return { kind: "release-ok" };
+              } catch (error) {
+                return { kind: "release-error", error };
+              }
+            })();
+
+            const timeoutOutcome = new Promise<TimeoutOutcome>((resolve) => {
+              const timeoutId = setTimeout(() => {
+                controller.abort();
+                resolve({ kind: "timeout" });
+              }, disposeTimeoutMs);
+
+              releaseOutcome.finally(() => clearTimeout(timeoutId));
+            });
+
+            const outcome = await Promise.race([
+              releaseOutcome,
+              timeoutOutcome,
+            ]);
+
+            if (outcome.kind === "release-ok") {
+              state = "disposed";
+              return;
+            }
+
+            if (outcome.kind === "timeout") {
+              state = "disposed";
+
+              // Fire-and-forget: observe release outcome once it settles.
+              // If backend.release eventually fails, surface the error via onReleaseError.
+              releaseOutcome.then((finalOutcome) => {
+                if (finalOutcome.kind === "release-error") {
+                  notifyDisposalError(finalOutcome.error);
+                }
+              });
+
+              return;
+            }
+
+            // Release failed before timeout elapsed.
+            throw outcome.error;
+          } else {
+            await backend.release({ lockId: result.lockId });
+            state = "disposed";
+          }
+        } catch (error) {
+          // Disposal failed before timeout (release error) - mark as disposed anyway (at-most-once semantics)
+          state = "disposed";
+
+          // Never throw from disposal per AsyncDisposable spec.
+          // Error is swallowed - disposal is best-effort cleanup.
+          notifyDisposalError(error);
         }
       })();
 
