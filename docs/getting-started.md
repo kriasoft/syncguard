@@ -157,7 +157,7 @@ const lock = createLock(db, {
 
 ## Manual Lock Control
 
-For long-running tasks or custom retry logic, use the backend directly with automatic cleanup:
+For long-running tasks or custom retry logic, use the backend directly with automatic cleanup. Note that the `lock()` function from the Quick Start is a high-level wrapper, while `createRedisBackend` (and similar `createXBackend` functions) provide direct access to the backend's lower-level operations:
 
 ```typescript
 import { createRedisBackend } from "syncguard/redis";

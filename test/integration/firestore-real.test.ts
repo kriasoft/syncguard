@@ -27,6 +27,10 @@ import {
 import type { LockBackend } from "../../common/backend.js";
 import { createFirestoreBackend } from "../../firestore/backend.js";
 import type { FirestoreCapabilities } from "../../firestore/types.js";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("Firestore Integration Tests", () => {
   let db: Firestore;
@@ -42,7 +46,9 @@ describe("Firestore Integration Tests", () => {
       ssl: false,
     });
 
-    console.log("✅ Connected to Firestore emulator for integration tests");
+    // Check Firestore emulator availability
+    const available = await checkFirestoreEmulatorAvailability(db);
+    handleFirestoreUnavailability(available, "Firestore Integration Tests");
 
     // Create backend with test-specific collections
     backend = createFirestoreBackend(db, {

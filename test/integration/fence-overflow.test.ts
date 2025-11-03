@@ -19,6 +19,10 @@ import Redis from "ioredis";
 import { LockError } from "../../common/errors.js";
 import { createFirestoreBackend } from "../../firestore";
 import { createRedisBackend } from "../../redis";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("Fence Overflow Enforcement (ADR-004)", () => {
   describe("Redis Backend", () => {
@@ -155,7 +159,7 @@ describe("Fence Overflow Enforcement (ADR-004)", () => {
     const testCollection = "test_overflow_locks";
     const testFenceCollection = "test_overflow_fences";
 
-    beforeAll(() => {
+    beforeAll(async () => {
       db = new Firestore({
         projectId: "test-project",
         host: "localhost:8080",
@@ -164,6 +168,13 @@ describe("Fence Overflow Enforcement (ADR-004)", () => {
           Authorization: "Bearer owner",
         },
       });
+
+      // Check Firestore emulator availability
+      const available = await checkFirestoreEmulatorAvailability(db);
+      handleFirestoreUnavailability(
+        available,
+        "Fence Overflow Enforcement (ADR-004)",
+      );
     });
 
     afterAll(async () => {

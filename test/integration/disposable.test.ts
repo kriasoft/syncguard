@@ -39,6 +39,10 @@ import { createPostgresBackend, setupSchema } from "../../postgres";
 import type { PostgresCapabilities } from "../../postgres/types.js";
 import { createRedisBackend } from "../../redis";
 import type { RedisCapabilities } from "../../redis/types.js";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("AsyncDisposable Integration Tests", () => {
   // Redis setup
@@ -54,6 +58,8 @@ describe("AsyncDisposable Integration Tests", () => {
   let firestoreBackend: LockBackend<FirestoreCapabilities>;
 
   const testKeyPrefix = "test:disposable:";
+
+  let firestoreAvailable = false;
 
   beforeAll(async () => {
     // Setup Redis
@@ -97,14 +103,12 @@ describe("AsyncDisposable Integration Tests", () => {
       },
     });
 
-    try {
-      await firestore.collection("_health").doc("test").set({ test: true });
-      await firestore.collection("_health").doc("test").delete();
-    } catch (error) {
-      console.warn(
-        "⚠️  Firestore emulator not available - Firestore tests will fail",
-      );
-    }
+    // Check Firestore emulator availability
+    firestoreAvailable = await checkFirestoreEmulatorAvailability(firestore);
+    handleFirestoreUnavailability(
+      firestoreAvailable,
+      "AsyncDisposable Integration Tests",
+    );
   });
 
   beforeEach(async () => {
@@ -113,11 +117,13 @@ describe("AsyncDisposable Integration Tests", () => {
 
     postgresBackend = await createPostgresBackend(sql);
 
-    firestoreBackend = createFirestoreBackend(firestore, {
-      collection: `${testKeyPrefix}locks`,
-      fenceCollection: `${testKeyPrefix}fences`,
-      disposeTimeoutMs: 10000, // Prevent indefinite hangs on CI/CD
-    });
+    if (firestoreAvailable) {
+      firestoreBackend = createFirestoreBackend(firestore, {
+        collection: `${testKeyPrefix}locks`,
+        fenceCollection: `${testKeyPrefix}fences`,
+        disposeTimeoutMs: 2000, // Timeout for graceful abort if disposal hangs
+      });
+    }
 
     // Clean up Redis keys
     try {
@@ -136,19 +142,21 @@ describe("AsyncDisposable Integration Tests", () => {
       // Ignore cleanup errors
     }
 
-    // Clean up Firestore collections
-    try {
-      const locksDocs = await firestore
-        .collection(`${testKeyPrefix}locks`)
-        .listDocuments();
-      await Promise.all(locksDocs.map((doc) => doc.delete()));
+    // Clean up Firestore collections (only if emulator is available)
+    if (firestoreAvailable) {
+      try {
+        const locksDocs = await firestore
+          .collection(`${testKeyPrefix}locks`)
+          .listDocuments();
+        await Promise.all(locksDocs.map((doc) => doc.delete()));
 
-      const fencesDocs = await firestore
-        .collection(`${testKeyPrefix}fences`)
-        .listDocuments();
-      await Promise.all(fencesDocs.map((doc) => doc.delete()));
-    } catch (error) {
-      // Ignore cleanup errors
+        const fencesDocs = await firestore
+          .collection(`${testKeyPrefix}fences`)
+          .listDocuments();
+        await Promise.all(fencesDocs.map((doc) => doc.delete()));
+      } catch (error) {
+        // Ignore cleanup errors
+      }
     }
   });
 
@@ -169,18 +177,21 @@ describe("AsyncDisposable Integration Tests", () => {
       // Ignore cleanup errors
     }
 
-    try {
-      const locksDocs = await firestore
-        .collection(`${testKeyPrefix}locks`)
-        .listDocuments();
-      await Promise.all(locksDocs.map((doc) => doc.delete()));
+    // Clean up Firestore collections (only if emulator is available)
+    if (firestoreAvailable) {
+      try {
+        const locksDocs = await firestore
+          .collection(`${testKeyPrefix}locks`)
+          .listDocuments();
+        await Promise.all(locksDocs.map((doc) => doc.delete()));
 
-      const fencesDocs = await firestore
-        .collection(`${testKeyPrefix}fences`)
-        .listDocuments();
-      await Promise.all(fencesDocs.map((doc) => doc.delete()));
-    } catch (error) {
-      // Ignore cleanup errors
+        const fencesDocs = await firestore
+          .collection(`${testKeyPrefix}fences`)
+          .listDocuments();
+        await Promise.all(fencesDocs.map((doc) => doc.delete()));
+      } catch (error) {
+        // Ignore cleanup errors
+      }
     }
   });
 
@@ -411,6 +422,7 @@ describe("AsyncDisposable Integration Tests", () => {
 
   describe("Firestore Backend Disposal", () => {
     it("should automatically release lock on scope exit", async () => {
+      if (!firestoreAvailable) return; // Skip if emulator unavailable
       const key = "firestore:auto-release";
 
       {
@@ -430,6 +442,7 @@ describe("AsyncDisposable Integration Tests", () => {
     });
 
     it("should release lock even if scope exits with error", async () => {
+      if (!firestoreAvailable) return; // Skip if emulator unavailable
       const key = "firestore:error-release";
 
       const testFn = async () => {
@@ -451,6 +464,7 @@ describe("AsyncDisposable Integration Tests", () => {
     });
 
     it("should support manual release with disposal handle", async () => {
+      if (!firestoreAvailable) return; // Skip if emulator unavailable
       const key = "firestore:manual-release";
 
       await using lock = await firestoreBackend.acquire({
@@ -471,6 +485,7 @@ describe("AsyncDisposable Integration Tests", () => {
     });
 
     it("should support extend operation with disposal handle", async () => {
+      if (!firestoreAvailable) return; // Skip if emulator unavailable
       const key = "firestore:extend";
 
       await using lock = await firestoreBackend.acquire({ key, ttlMs: 500 });
@@ -503,7 +518,9 @@ describe("AsyncDisposable Integration Tests", () => {
       const backends = [
         { name: "Redis", backend: redisBackend },
         { name: "Postgres", backend: postgresBackend },
-        { name: "Firestore", backend: firestoreBackend },
+        ...(firestoreAvailable
+          ? [{ name: "Firestore", backend: firestoreBackend }]
+          : []),
       ];
 
       for (const { name, backend } of backends) {
@@ -526,7 +543,9 @@ describe("AsyncDisposable Integration Tests", () => {
       const backends = [
         { name: "Redis", backend: redisBackend },
         { name: "Postgres", backend: postgresBackend },
-        { name: "Firestore", backend: firestoreBackend },
+        ...(firestoreAvailable
+          ? [{ name: "Firestore", backend: firestoreBackend }]
+          : []),
       ];
 
       for (const { name, backend } of backends) {

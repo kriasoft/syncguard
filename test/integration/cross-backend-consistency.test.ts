@@ -21,6 +21,10 @@ import Redis from "ioredis";
 import { makeStorageKey } from "../../common/crypto.js";
 import { createFirestoreBackend } from "../../firestore";
 import { createRedisBackend } from "../../redis";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("Cross-Backend Consistency (ADR-006)", () => {
   let redis: Redis;
@@ -55,6 +59,13 @@ describe("Cross-Backend Consistency (ADR-006)", () => {
         Authorization: "Bearer owner",
       },
     });
+
+    // Check Firestore emulator availability
+    const available = await checkFirestoreEmulatorAvailability(db);
+    handleFirestoreUnavailability(
+      available,
+      "Cross-Backend Consistency (ADR-006)",
+    );
   });
 
   afterAll(async () => {
