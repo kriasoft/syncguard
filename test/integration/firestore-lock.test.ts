@@ -32,6 +32,10 @@ import type { LockBackend } from "../../common";
 import { LockError } from "../../common/errors.js";
 import { createFirestoreBackend, createLock } from "../../firestore";
 import type { FirestoreCapabilities } from "../../firestore/types";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("Firestore Lock Integration Tests", () => {
   let db: Firestore;
@@ -48,7 +52,12 @@ describe("Firestore Lock Integration Tests", () => {
       ssl: false,
     });
 
-    console.log("✅ Connected to Firestore emulator for integration tests");
+    // Check Firestore emulator availability
+    const available = await checkFirestoreEmulatorAvailability(db);
+    handleFirestoreUnavailability(
+      available,
+      "Firestore Lock Integration Tests",
+    );
   });
 
   beforeEach(async () => {

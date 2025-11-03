@@ -39,6 +39,10 @@ import { createPostgresBackend, setupSchema } from "../../postgres";
 import type { PostgresCapabilities } from "../../postgres/types.js";
 import { createRedisBackend } from "../../redis";
 import type { RedisCapabilities } from "../../redis/types.js";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("AsyncDisposable Integration Tests", () => {
   // Redis setup
@@ -89,7 +93,7 @@ describe("AsyncDisposable Integration Tests", () => {
       console.warn("⚠️  Postgres not available - Postgres tests will fail");
     }
 
-    // Setup Firestore with connection timeout to detect unavailable emulator quickly
+    // Setup Firestore
     firestore = new Firestore({
       projectId: "test-project",
       host: "localhost:8080",
@@ -99,38 +103,12 @@ describe("AsyncDisposable Integration Tests", () => {
       },
     });
 
-    // Test Firestore emulator availability with timeout
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-
-      // Create a promise that rejects when signal is aborted
-      const abortPromise = new Promise<never>((_, reject) => {
-        controller.signal.addEventListener("abort", () => {
-          reject(new Error("Firestore emulator timeout"));
-        });
-      });
-
-      // Create a promise that completes when Firestore responds
-      const testPromise = (async () => {
-        await firestore.collection("_health").doc("test").set({ test: true });
-        await firestore.collection("_health").doc("test").delete();
-      })();
-
-      try {
-        // Race: either Firestore responds or timeout fires
-        await Promise.race([testPromise, abortPromise]);
-        firestoreAvailable = true;
-        console.log("✅ Connected to Firestore emulator for integration tests");
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    } catch (error) {
-      console.warn(
-        "⚠️  Firestore emulator not available - Firestore tests will be skipped",
-      );
-      firestoreAvailable = false;
-    }
+    // Check Firestore emulator availability
+    firestoreAvailable = await checkFirestoreEmulatorAvailability(firestore);
+    handleFirestoreUnavailability(
+      firestoreAvailable,
+      "AsyncDisposable Integration Tests",
+    );
   });
 
   beforeEach(async () => {

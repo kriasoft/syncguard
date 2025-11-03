@@ -8,6 +8,10 @@ import { LockError } from "../../common/errors.js";
 import type { LockBackend } from "../../common/types.js";
 import { createFirestoreBackend } from "../../firestore/index.js";
 import { createRedisBackend } from "../../redis/index.js";
+import {
+  checkFirestoreEmulatorAvailability,
+  handleFirestoreUnavailability,
+} from "./firestore-emulator-check.js";
 
 describe("AbortSignal support", () => {
   let redis: Redis;
@@ -36,6 +40,10 @@ describe("AbortSignal support", () => {
         Authorization: "Bearer owner",
       },
     });
+
+    // Check Firestore emulator availability
+    const available = await checkFirestoreEmulatorAvailability(firestore);
+    handleFirestoreUnavailability(available, "AbortSignal support");
 
     firestoreBackend = createFirestoreBackend(firestore, {
       collection: "test_abort_locks",
