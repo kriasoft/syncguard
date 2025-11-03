@@ -32,9 +32,9 @@
     "synchronization",
     "typescript"
   ],
-  "author": "Konstantin Tarkus <hello@tarkus.me>",
+  "author": "Konstantin Tarkus <koistya@kriasoft.com>",
   "license": "MIT",
-  "homepage": "https://github.com/kriasoft/syncguard#readme",
+  "homepage": "https://kriasoft.com/syncguard/",
   "repository": "github:kriasoft/syncguard",
   "bugs": "https://github.com/kriasoft/syncguard/issues",
   "funding": "https://github.com/sponsors/koistya",

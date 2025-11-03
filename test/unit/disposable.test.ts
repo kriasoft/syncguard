@@ -966,7 +966,7 @@ describe("Disposable Lock Tests", () => {
     it("should abort disposal after timeout", async () => {
       const onReleaseErrorSpy = mock<OnReleaseError>();
 
-      // Mock release to hang indefinitely
+      // Mock release to hang indefinitely (respects abort signal)
       (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
         ({ signal }: { signal?: AbortSignal }) => {
           return new Promise((_, reject) => {
@@ -987,16 +987,33 @@ describe("Disposable Lock Tests", () => {
         100, // 100ms timeout
       );
 
-      // Disposal should complete within timeout window
-      const startTime = Date.now();
-      await handle[Symbol.asyncDispose]();
-      const elapsed = Date.now() - startTime;
+      // Stub setTimeout: captures scheduled delay and callback. Without this,
+      // the test can't verify the timeout value and relies on wall-clock timing.
+      let timeoutCallback: any = null;
+      let capturedDelay = 0;
+      const setTimeoutSpy = spyOn(globalThis, "setTimeout")
+        // @ts-expect-error - Mocking setTimeout for test purposes
+        .mockImplementation((callback: any, delay: any) => {
+          timeoutCallback = callback;
+          capturedDelay = delay;
+          return 0; // Return dummy timer ID
+        });
 
-      // Should abort around 100ms (allow some margin)
-      expect(elapsed).toBeLessThan(200);
-      expect(elapsed).toBeGreaterThanOrEqual(100);
+      // Kick off disposal (which schedules the timeout)
+      const disposalPromise = handle[Symbol.asyncDispose]();
 
-      // Error callback should be invoked with abort error
+      // Verify timeout was scheduled for exactly 100ms (catches regressions
+      // if timeout value is changed or accidentally removed)
+      expect(capturedDelay).toBe(100);
+      expect(timeoutCallback).not.toBeNull();
+
+      // Manually invoke the timeout callback (keeps test deterministic and fast)
+      timeoutCallback();
+
+      // Await disposal completion
+      await disposalPromise;
+
+      // Verify timeout worked: error callback should be invoked
       expect(onReleaseErrorSpy).toHaveBeenCalledTimes(1);
       const [error, context] = onReleaseErrorSpy.mock.calls[0]!;
       expect(error.message).toContain("timed out");
@@ -1005,6 +1022,8 @@ describe("Disposable Lock Tests", () => {
         key: "test-key",
         source: "disposal",
       });
+
+      setTimeoutSpy.mockRestore();
     });
 
     it("should not timeout when release completes quickly", async () => {
@@ -1023,41 +1042,61 @@ describe("Disposable Lock Tests", () => {
         1000, // 1s timeout
       );
 
+      // Disposal completes without timeout
       const startTime = Date.now();
       await handle[Symbol.asyncDispose]();
       const elapsed = Date.now() - startTime;
 
-      // Should complete quickly
-      expect(elapsed).toBeLessThan(100);
-
-      // No error callback invoked
+      // Key assertions:
+      // 1. No error callback invoked (release succeeded, no timeout)
       expect(onReleaseErrorSpy).not.toHaveBeenCalled();
+      // 2. Release completed promptly (< 100ms, well under 1s timeout)
+      expect(elapsed).toBeLessThan(100);
     });
 
     it("should not apply timeout when disposeTimeoutMs is undefined", async () => {
-      // Mock release to complete after 200ms
+      const onReleaseErrorSpy = mock<OnReleaseError>();
+
+      let releaseResolver: ((value: ReleaseResult) => void) | undefined;
       (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
-        () => {
-          return new Promise((resolve) => {
-            setTimeout(() => resolve({ ok: true }), 200);
-          });
-        },
+        () =>
+          new Promise<ReleaseResult>((resolve) => {
+            releaseResolver = resolve;
+          }),
       );
 
       const handle = createDisposableHandle(
         mockBackend,
         mockAcquireResult,
         "test-key",
-        undefined, // no callback
+        onReleaseErrorSpy,
         undefined, // no timeout
       );
 
-      const startTime = Date.now();
-      await handle[Symbol.asyncDispose]();
-      const elapsed = Date.now() - startTime;
+      let setTimeoutCalled = false;
+      const setTimeoutSpy = spyOn(globalThis, "setTimeout")
+        // @ts-expect-error - Mocking setTimeout for test purposes
+        .mockImplementation((callback: any, delay?: number) => {
+          setTimeoutCalled = true;
+          return 0;
+        });
 
-      // Should wait full 200ms
-      expect(elapsed).toBeGreaterThanOrEqual(200);
+      const disposalPromise = handle[Symbol.asyncDispose]();
+
+      expect(mockBackend.release).toHaveBeenCalledWith({
+        lockId: "test-lock-timeout",
+      });
+      expect(releaseResolver).toBeDefined();
+
+      // Manually resolve release to keep test deterministic
+      releaseResolver!({ ok: true });
+      await disposalPromise;
+
+      // No timer indicates disposeTimeoutMs was not applied
+      expect(onReleaseErrorSpy).not.toHaveBeenCalled();
+      expect(setTimeoutCalled).toBe(false);
+
+      setTimeoutSpy.mockRestore();
     });
 
     it("should pass signal to manual release when timeout is configured", async () => {
@@ -1087,7 +1126,7 @@ describe("Disposable Lock Tests", () => {
     it("should work with decorateAcquireResult", async () => {
       const onReleaseErrorSpy = mock<OnReleaseError>();
 
-      // Mock release to hang
+      // Mock release to hang (respects abort signal)
       (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
         ({ signal }: { signal?: AbortSignal }) => {
           return new Promise((_, reject) => {
@@ -1118,12 +1157,36 @@ describe("Disposable Lock Tests", () => {
       );
 
       if (decorated.ok) {
-        const startTime = Date.now();
-        await decorated[Symbol.asyncDispose]();
-        const elapsed = Date.now() - startTime;
+        // Stub setTimeout: captures scheduled delay and callback. Without this,
+        // the test can't verify the timeout value and relies on wall-clock timing.
+        let timeoutCallback: any = null;
+        let capturedDelay = 0;
+        const setTimeoutSpy = spyOn(globalThis, "setTimeout")
+          // @ts-expect-error - Mocking setTimeout for test purposes
+          .mockImplementation((callback: any, delay: any) => {
+            timeoutCallback = callback;
+            capturedDelay = delay;
+            return 0; // Return dummy timer ID
+          });
 
-        expect(elapsed).toBeLessThan(200);
+        // Kick off disposal (which schedules the timeout)
+        const disposalPromise = decorated[Symbol.asyncDispose]();
+
+        // Verify timeout was scheduled for exactly 100ms (catches regressions
+        // if timeout value is changed or accidentally removed)
+        expect(capturedDelay).toBe(100);
+        expect(timeoutCallback).not.toBeNull();
+
+        // Manually invoke the timeout callback (keeps test deterministic and fast)
+        timeoutCallback();
+
+        // Await disposal completion
+        await disposalPromise;
+
+        // Verify timeout worked: error callback should be invoked
         expect(onReleaseErrorSpy).toHaveBeenCalledTimes(1);
+
+        setTimeoutSpy.mockRestore();
       }
     });
   });

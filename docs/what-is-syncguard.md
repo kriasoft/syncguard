@@ -1,6 +1,6 @@
 # What is SyncGuard?
 
-SyncGuard is a TypeScript distributed lock library that prevents race conditions across microservices. It provides a simple API for coordinating access to shared resources using Redis, PostgreSQL, or Firestore as the backend.
+SyncGuard is a distributed lock library for TypeScript that prevents race conditions in distributed systems. It provides a simple API for coordinating access to shared resources using Redis, PostgreSQL, or Firestore as the backend.
 
 ## The Problem: Race Conditions in Distributed Systems
 
@@ -45,6 +45,8 @@ await lock(
   { key: `payment:${paymentId}`, ttlMs: 60000 },
 );
 ```
+
+The `lock()` function is a high-level wrapper for simple "run-this-exclusively" tasks. For more advanced use cases like rate limiting or conditional locking, you can use the core `backend` object directly.
 
 The first process acquires the lock. Others wait or retry. Your customer gets charged once.
 
