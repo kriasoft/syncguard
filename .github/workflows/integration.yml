@@ -63,6 +63,8 @@ jobs:
         run: for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
       - name: Wait for Postgres (5432)
         run: for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
+      - name: Wait for Firestore (8080)
+        run: for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
 
       - run: bun run test:integration
       - run: bun run test:performance

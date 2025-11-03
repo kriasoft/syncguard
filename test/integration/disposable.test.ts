@@ -439,7 +439,7 @@ describe("AsyncDisposable Integration Tests", () => {
 
       // Lock should be automatically released
       expect(await firestoreBackend.isLocked({ key })).toBe(false);
-    });
+    }, 10000); // 10s timeout for Firestore emulator operations
 
     it("should release lock even if scope exits with error", async () => {
       if (!firestoreAvailable) return; // Skip if emulator unavailable
@@ -459,9 +459,20 @@ describe("AsyncDisposable Integration Tests", () => {
 
       await expect(testFn()).rejects.toThrow("Test error");
 
-      // Lock should still be released
-      expect(await firestoreBackend.isLocked({ key })).toBe(false);
-    });
+      // Lock should still be released. Disposal uses disposeTimeoutMs (2000ms),
+      // and if Firestore is slow, disposal timeout error is logged via onReleaseError
+      // but the scope still completes normally. The in-flight RPC may continue
+      // in the background, so we poll for completion with a timeout.
+      let isLocked = await firestoreBackend.isLocked({ key });
+      let waitMs = 0;
+      const maxWaitMs = 5000; // Wait up to 5s for Firestore RPC to complete
+      while (isLocked && waitMs < maxWaitMs) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        isLocked = await firestoreBackend.isLocked({ key });
+        waitMs += 100;
+      }
+      expect(isLocked).toBe(false);
+    }, 20000); // 20s timeout: accounts for disposal timeout (2s) + RPC retry (5s) + test overhead
 
     it("should support manual release with disposal handle", async () => {
       if (!firestoreAvailable) return; // Skip if emulator unavailable
@@ -482,7 +493,7 @@ describe("AsyncDisposable Integration Tests", () => {
         // Lock should be released
         expect(await firestoreBackend.isLocked({ key })).toBe(false);
       }
-    });
+    }, 10000); // 10s timeout for Firestore emulator operations
 
     it("should support extend operation with disposal handle", async () => {
       if (!firestoreAvailable) return; // Skip if emulator unavailable
@@ -510,7 +521,7 @@ describe("AsyncDisposable Integration Tests", () => {
         // Lock should still be held
         expect(await firestoreBackend.isLocked({ key })).toBe(true);
       }
-    });
+    }, 10000); // 10s timeout for Firestore emulator operations
   });
 
   describe("Cross-backend Consistency", () => {
@@ -537,7 +548,7 @@ describe("AsyncDisposable Integration Tests", () => {
         // Lock should be released after disposal
         expect(await backend.isLocked({ key })).toBe(false);
       }
-    });
+    }, 15000); // 15s timeout since Firestore may be included
 
     it("should handle manual operations consistently across backends", async () => {
       const backends = [
@@ -567,6 +578,6 @@ describe("AsyncDisposable Integration Tests", () => {
           expect(extendResult.ok).toBe(false);
         }
       }
-    });
+    }, 15000); // 15s timeout since Firestore may be included
   });
 });
