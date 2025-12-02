@@ -279,4 +279,40 @@ describe("acquireHandle", () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it("should return decorated result for successful acquisition", async () => {
+    const { decorateAcquireResult } = require("../../../common/disposable.js");
+
+    const mockOps = {
+      release: async () => ({ ok: true }),
+      extend: async () => ({ ok: true, expiresAtMs: Date.now() + 30000 }),
+    };
+
+    const decoratedBackend = {
+      acquire: async () => {
+        const result = {
+          ok: true,
+          lockId: "decorated-lock-456",
+          expiresAtMs: Date.now() + 30000,
+        };
+        return decorateAcquireResult(mockOps, result, "test-key");
+      },
+    };
+
+    const handle = await acquireHandle(decoratedBackend, {
+      key: "test",
+      ttlMs: 30000,
+    });
+
+    expect(handle.ok).toBe(true);
+    if (handle.ok) {
+      expect(handle.lockId).toBe("decorated-lock-456");
+      expect(typeof handle.release).toBe("function");
+      expect(typeof handle.extend).toBe("function");
+      expect(typeof handle[Symbol.asyncDispose]).toBe("function");
+
+      // Clean up
+      await handle[Symbol.asyncDispose]();
+    }
+  });
 });

@@ -282,6 +282,212 @@ describe("lock() retry behavior", () => {
 
       expect(calls).toBe(3);
     });
+
+    it("should apply full jitter strategy (delay = random * baseDelay)", async () => {
+      // Full jitter formula: delay = Math.random() * baseDelay
+      // Mock Math.random to return 0.25, so delay should be 0.25 * 100 = 25ms
+      // Mock setTimeout to capture exact delay values without wall-clock timing
+      const originalRandom = Math.random;
+      const originalDateNow = Date.now;
+      const originalSetTimeout = globalThis.setTimeout;
+
+      Math.random = () => 0.25;
+      let mockTime = 1000;
+      const delaysPassed: number[] = [];
+
+      Date.now = () => mockTime;
+
+      // Mock setTimeout to capture delay values and resolve immediately
+      globalThis.setTimeout = ((callback: () => void, ms: number) => {
+        delaysPassed.push(ms);
+        mockTime += ms; // Advance mock time
+        callback(); // Resolve immediately
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+
+      let calls = 0;
+      const mockBackendOps = {
+        release: mock(async () => ({ ok: true as const })),
+        extend: mock(async () => ({
+          ok: true as const,
+          expiresAtMs: mockTime + 30000,
+        })),
+      };
+
+      (mockBackend.acquire as ReturnType<typeof mock>).mockImplementation(
+        async () => {
+          calls++;
+          if (calls < 3) {
+            return { ok: false, reason: "locked" };
+          }
+          const result: AcquireResult<TestCapabilities> = {
+            ok: true,
+            lockId: "test-lock-id",
+            expiresAtMs: mockTime + 30000,
+            fence: "000000000000001",
+          };
+          return decorateAcquireResult(mockBackendOps, result, "test-key");
+        },
+      );
+
+      try {
+        const baseDelay = 100;
+        await lock(mockBackend, async () => "success", {
+          key: "test-key",
+          ttlMs: 30000,
+          acquisition: {
+            maxRetries: 10,
+            retryDelayMs: baseDelay,
+            timeoutMs: 5000,
+            backoff: "fixed",
+            jitter: "full",
+          },
+        });
+
+        expect(calls).toBe(3);
+
+        // With random() = 0.25, full jitter: delay = 0.25 * 100 = 25ms exactly
+        // 2 retries = 2 delays
+        expect(delaysPassed.length).toBe(2);
+        expect(delaysPassed[0]).toBe(25); // Exact value, not 100 (no jitter)
+        expect(delaysPassed[1]).toBe(25);
+      } finally {
+        Math.random = originalRandom;
+        Date.now = originalDateNow;
+        globalThis.setTimeout = originalSetTimeout;
+      }
+    });
+
+    it("should apply equal jitter strategy (delay = base/2 + random * base/2)", async () => {
+      // Equal jitter formula: delay = baseDelay/2 + Math.random() * baseDelay/2
+      // Mock Math.random to return 0.5, so delay = 50 + 0.5 * 50 = 75ms
+      const originalRandom = Math.random;
+      const originalDateNow = Date.now;
+      const originalSetTimeout = globalThis.setTimeout;
+
+      Math.random = () => 0.5;
+      let mockTime = 1000;
+      const delaysPassed: number[] = [];
+
+      Date.now = () => mockTime;
+
+      globalThis.setTimeout = ((callback: () => void, ms: number) => {
+        delaysPassed.push(ms);
+        mockTime += ms;
+        callback();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+
+      let calls = 0;
+      const mockBackendOps = {
+        release: mock(async () => ({ ok: true as const })),
+        extend: mock(async () => ({
+          ok: true as const,
+          expiresAtMs: mockTime + 30000,
+        })),
+      };
+
+      (mockBackend.acquire as ReturnType<typeof mock>).mockImplementation(
+        async () => {
+          calls++;
+          if (calls < 3) {
+            return { ok: false, reason: "locked" };
+          }
+          const result: AcquireResult<TestCapabilities> = {
+            ok: true,
+            lockId: "test-lock-id",
+            expiresAtMs: mockTime + 30000,
+            fence: "000000000000001",
+          };
+          return decorateAcquireResult(mockBackendOps, result, "test-key");
+        },
+      );
+
+      try {
+        const baseDelay = 100;
+        await lock(mockBackend, async () => "success", {
+          key: "test-key",
+          ttlMs: 30000,
+          acquisition: {
+            maxRetries: 10,
+            retryDelayMs: baseDelay,
+            timeoutMs: 5000,
+            backoff: "fixed",
+            jitter: "equal",
+          },
+        });
+
+        expect(calls).toBe(3);
+
+        // With random() = 0.5, equal jitter: delay = 50 + 0.5 * 50 = 75ms exactly
+        expect(delaysPassed.length).toBe(2);
+        expect(delaysPassed[0]).toBe(75); // Exact value, not 100 or 50
+        expect(delaysPassed[1]).toBe(75);
+      } finally {
+        Math.random = originalRandom;
+        Date.now = originalDateNow;
+        globalThis.setTimeout = originalSetTimeout;
+      }
+    });
+  });
+
+  describe("timeout edge cases", () => {
+    it("should throw when retry delay is clamped to zero by remaining time", async () => {
+      // This tests the retryDelay <= 0 branch (lines 206-210) which guards against
+      // a race where remaining time becomes <= 0 between the pre-acquire timeout
+      // check (line 150) and the retry delay calculation (line 195-203).
+      //
+      // We use Date.now() mocking to deterministically trigger this edge case:
+      // - First call: time = 0 (start), passes timeout check
+      // - acquire() contends
+      // - After acquire returns: time = 101 (exceeds 100ms timeout)
+      // - retryDelay calculation sees remainingTime = 100 - 101 = -1
+      // - retryDelay is clamped to max(0, -1) = 0
+      // - Branch throws "Timeout reached before next retry"
+      const originalDateNow = Date.now;
+      let mockTime = 1000;
+
+      Date.now = () => mockTime;
+
+      let calls = 0;
+      (mockBackend.acquire as ReturnType<typeof mock>).mockImplementation(
+        async () => {
+          calls++;
+          if (calls === 1) {
+            // Simulate time passing during acquire - exceeds timeout
+            mockTime += 101;
+            return { ok: false, reason: "locked" };
+          }
+          return { ok: false, reason: "locked" };
+        },
+      );
+
+      try {
+        await lock(mockBackend, async () => "success", {
+          key: "test-key",
+          ttlMs: 30000,
+          acquisition: {
+            maxRetries: 100,
+            retryDelayMs: 10,
+            timeoutMs: 100, // 100ms timeout, but mock jumps to 101ms
+            backoff: "fixed",
+            jitter: "none",
+          },
+        });
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LockError);
+        expect((error as LockError).code).toBe("AcquisitionTimeout");
+        // Verify we hit the specific retryDelay <= 0 branch
+        expect((error as LockError).message).toMatch(
+          /Timeout reached before next retry/,
+        );
+      } finally {
+        Date.now = originalDateNow;
+      }
+
+      expect(calls).toBe(1);
+    });
   });
 
   describe("AbortSignal support", () => {
