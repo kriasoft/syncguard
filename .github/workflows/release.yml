@@ -26,7 +26,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
       - uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -34,5 +33,11 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: npm publish --access public --provenance
+      - name: Publish to npm (OIDC)
+        run: |
+          rm -f ~/.npmrc
+          npm publish --access public --provenance
         working-directory: ./dist
+        env:
+          NODE_AUTH_TOKEN: ""
+          NPM_TOKEN: ""
