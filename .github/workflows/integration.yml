@@ -11,11 +11,103 @@ permissions:
   packages: read
 
 jobs:
-  integration:
-    name: Integration & Performance Tests
+  contracts:
+    name: Contract Tests (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [redis, postgres, firestore]
+
+    services:
+      redis:
+        image: ${{ matrix.backend == 'redis' && 'redis:7-alpine' || '' }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: ${{ matrix.backend == 'postgres' && 'postgres:17-alpine' || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: syncguard
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d syncguard"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
-      # Make explicit for tests that honor env vars
+      REDIS_URL: redis://127.0.0.1:6379
+      POSTGRES_URL: postgres://postgres@127.0.0.1:5432/syncguard
+      TEST_REDIS: ${{ matrix.backend == 'redis' && 'true' || 'false' }}
+      TEST_POSTGRES: ${{ matrix.backend == 'postgres' && 'true' || 'false' }}
+      TEST_FIRESTORE: ${{ matrix.backend == 'firestore' && 'true' || 'false' }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
+      - name: Setup Java (for Firestore)
+        if: matrix.backend == 'firestore'
+        uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version: "25"
+
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+      - name: Start Firestore emulator
+        if: matrix.backend == 'firestore'
+        run: bun firebase emulators:start --only firestore & echo $! > emulator.pid
+
+      - name: Wait for service
+        run: |
+          if [ "${{ matrix.backend }}" = "redis" ]; then
+            for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
+          elif [ "${{ matrix.backend }}" = "postgres" ]; then
+            for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
+          elif [ "${{ matrix.backend }}" = "firestore" ]; then
+            for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
+          fi
+
+      - run: bun run test:contracts:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: contracts-${{ matrix.backend }}
+          fail_ci_if_error: false
+
+      - name: Kill Firestore emulator
+        if: always() && matrix.backend == 'firestore'
+        run: |
+          if [ -f emulator.pid ]; then
+            kill $(cat emulator.pid) || true
+            rm emulator.pid
+          fi
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [contracts]
+    env:
       REDIS_URL: redis://127.0.0.1:6379
       POSTGRES_URL: postgres://postgres@127.0.0.1:5432/syncguard
 
@@ -47,6 +139,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
       - uses: actions/setup-java@v5
         with:
           distribution: "temurin"
@@ -55,26 +154,23 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
 
-      # Launch Firestore emulator
-      - run: bun firebase emulators:start --only firestore & echo $! > emulator.pid
+      - name: Start Firestore emulator
+        run: bun firebase emulators:start --only firestore & echo $! > emulator.pid
 
-      # Ensure services are reachable (ports open) before tests
-      - name: Wait for Redis (6379)
-        run: for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
-      - name: Wait for Postgres (5432)
-        run: for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
-      - name: Wait for Firestore (8080)
-        run: for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
+      - name: Wait for services
+        run: |
+          for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
+          for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
+          for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
 
-      - run: bun run test:integration:coverage
-      - run: bun run test:performance
+      - run: bun run test:e2e:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/lcov.info
-          flags: integration
+          flags: e2e
           fail_ci_if_error: false
 
       - name: Kill Firestore emulator
@@ -83,5 +179,46 @@ jobs:
           if [ -f emulator.pid ]; then
             kill $(cat emulator.pid) || true
             rm emulator.pid
-            echo "Emulator killed"
           fi
+
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [contracts]
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      REDIS_URL: redis://127.0.0.1:6379
+      RUN_BENCHMARKS: "1"
+      TEST_REDIS: "true"
+      TEST_POSTGRES: "false"
+      TEST_FIRESTORE: "false"
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+      - name: Wait for Redis
+        run: for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
+
+      - run: bun run test:benchmarks
