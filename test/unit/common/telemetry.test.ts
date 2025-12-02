@@ -242,6 +242,17 @@ describe("withTelemetry", () => {
       expect(result.ok).toBe(false);
       expect(events[0]?.reason).toBe("not-found");
     });
+
+    it("should include raw lockId when includeRaw is true", async () => {
+      const backend = withTelemetry(mockBackend, {
+        onEvent,
+        includeRaw: true,
+      });
+
+      await backend.extend({ lockId: "test-lock-id", ttlMs: 30000 });
+
+      expect(events[0]?.lockId).toBe("test-lock-id");
+    });
   });
 
   describe("isLocked operation", () => {
