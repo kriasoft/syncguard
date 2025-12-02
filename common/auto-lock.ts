@@ -232,8 +232,6 @@ export async function lock<T, C extends BackendCapabilities>(
   // Execute user function, auto-release in finally block
   try {
     return await fn();
-  } catch (error) {
-    throw error; // Re-throw after release in finally
   } finally {
     // Best-effort release: don't throw, lock expires via TTL
     try {

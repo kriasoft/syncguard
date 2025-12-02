@@ -417,4 +417,142 @@ describe("lock() retry behavior", () => {
       });
     });
   });
+
+  describe("release failure handling", () => {
+    it("should return function result when release fails", async () => {
+      (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new Error("Release failed"),
+      );
+
+      const result = await lock(mockBackend, async () => "success", {
+        key: "test-key",
+        ttlMs: 30000,
+      });
+
+      expect(result).toBe("success");
+    });
+
+    it("should call default error handler when release fails (non-production)", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+      const consoleSpy = mock((..._args: unknown[]) => {});
+      const originalError = console.error;
+      console.error = consoleSpy;
+
+      try {
+        (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+          new Error("Network error"),
+        );
+
+        await lock(mockBackend, async () => "success", {
+          key: "test-key",
+          ttlMs: 30000,
+        });
+
+        expect(consoleSpy).toHaveBeenCalled();
+        const callArgs = consoleSpy.mock.calls[0]!;
+        expect(callArgs[0]).toBe("[SyncGuard] Lock disposal failed:");
+        expect(callArgs[1]).toMatchObject({
+          error: "Network error",
+          errorName: "Error",
+          source: "disposal",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+        console.error = originalError;
+      }
+    });
+
+    it("should call custom onReleaseError when release fails", async () => {
+      const onReleaseError = mock(
+        (
+          _err: Error,
+          _ctx: { lockId: string; key: string; source: string },
+        ) => {},
+      );
+      (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new Error("Release failed"),
+      );
+
+      await lock(mockBackend, async () => "success", {
+        key: "test-key",
+        ttlMs: 30000,
+        onReleaseError,
+      });
+
+      expect(onReleaseError).toHaveBeenCalledTimes(1);
+      const [err, ctx] = onReleaseError.mock.calls[0]!;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe("Release failed");
+      expect(ctx).toMatchObject({
+        lockId: "test-lock-id",
+        key: "test-key",
+        source: "disposal",
+      });
+    });
+
+    it("should normalize non-Error release failures", async () => {
+      const onReleaseError = mock((_err: Error, _ctx: unknown) => {});
+      (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+        "string error",
+      );
+
+      await lock(mockBackend, async () => "success", {
+        key: "test-key",
+        ttlMs: 30000,
+        onReleaseError,
+      });
+
+      expect(onReleaseError).toHaveBeenCalledTimes(1);
+      const [err] = onReleaseError.mock.calls[0]!;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe("string error");
+      expect((err as Error & { originalError?: unknown }).originalError).toBe(
+        "string error",
+      );
+    });
+
+    it("should swallow errors thrown by onReleaseError callback", async () => {
+      const onReleaseError = mock(() => {
+        throw new Error("Callback error");
+      });
+      (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new Error("Release failed"),
+      );
+
+      // Should not throw despite callback error
+      const result = await lock(mockBackend, async () => "success", {
+        key: "test-key",
+        ttlMs: 30000,
+        onReleaseError,
+      });
+
+      expect(result).toBe("success");
+      expect(onReleaseError).toHaveBeenCalled();
+    });
+
+    it("should propagate function error even when release fails", async () => {
+      const onReleaseError = mock(() => {});
+      (mockBackend.release as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new Error("Release failed"),
+      );
+
+      await expect(
+        lock(
+          mockBackend,
+          async () => {
+            throw new Error("Function error");
+          },
+          {
+            key: "test-key",
+            ttlMs: 30000,
+            onReleaseError,
+          },
+        ),
+      ).rejects.toThrow("Function error");
+
+      // onReleaseError should still be called
+      expect(onReleaseError).toHaveBeenCalled();
+    });
+  });
 });
