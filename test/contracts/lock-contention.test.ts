@@ -30,10 +30,10 @@ describe("Lock Contention", async () => {
       // Firestore is slower due to HTTP round-trips - use longer base timeouts
       const shortTtl = fixture.kind === "firestore" ? 2000 : 1000;
       // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms) + network buffer
-      const sleepBuffer = fixture.kind === "firestore" ? 4000 : 2500;
-      // Firestore tests need longer timeout and retry for network variability
+      const sleepBuffer = fixture.kind === "firestore" ? 5000 : 2500;
+      // Firestore tests need longer timeout and retry for network variability on CI
       const slowTestOpts =
-        fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
+        fixture.kind === "firestore" ? { timeout: 20000, retry: 2 } : {};
 
       beforeAll(async () => {
         const result = await fixture.setup();
