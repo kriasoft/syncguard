@@ -4,7 +4,9 @@
 codecov:
   require_ci_to_pass: yes
   notify:
-    after_n_builds: 2
+    # Wait for all 6 coverage uploads before reporting:
+    # 2 unit (latest + canary) + 3 contracts (redis, postgres, firestore) + 1 e2e
+    after_n_builds: 6
 
 coverage:
   precision: 2
@@ -25,7 +27,7 @@ coverage:
 comment:
   layout: "reach, diff, flags, files"
   behavior: default
-  require_changes: no
+  require_changes: false
 
 ignore:
   - "dist/"
@@ -42,7 +44,22 @@ flags:
       - "postgres/"
       - "firestore/"
     carryforward: true
-  integration:
+  contracts-redis:
+    paths:
+      - "common/"
+      - "redis/"
+    carryforward: true
+  contracts-postgres:
+    paths:
+      - "common/"
+      - "postgres/"
+    carryforward: true
+  contracts-firestore:
+    paths:
+      - "common/"
+      - "firestore/"
+    carryforward: true
+  e2e:
     paths:
       - "common/"
       - "redis/"
