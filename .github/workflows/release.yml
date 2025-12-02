@@ -25,7 +25,7 @@ jobs:
           bun-version: latest
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - uses: actions/cache@v4
         with:
@@ -36,3 +36,5 @@ jobs:
       - run: bun run build
       - run: npm publish --access public --provenance
         working-directory: ./dist
+        env:
+          NPM_CONFIG_PROVENANCE: true
