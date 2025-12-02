@@ -18,8 +18,11 @@ export interface FirestoreFixture {
   }>;
 }
 
-const TEST_COLLECTION = "syncguard_test_locks";
-const TEST_FENCE_COLLECTION = "syncguard_test_fences";
+// Unique suffix per process to isolate parallel test workers
+// This prevents cleanup routines in one worker from deleting locks held by another
+const WORKER_SUFFIX = `_${process.pid}_${Date.now().toString(36)}`;
+const TEST_COLLECTION = `syncguard_test_locks${WORKER_SUFFIX}`;
+const TEST_FENCE_COLLECTION = `syncguard_test_fences${WORKER_SUFFIX}`;
 
 /**
  * Check if Firestore emulator is available by attempting a health check operation.
@@ -100,19 +103,14 @@ export const firestoreFixture: FirestoreFixture = {
       ssl: false,
     });
 
-    // Clean test collections
-    const lockDocs = await db.collection(TEST_COLLECTION).listDocuments();
-    const fenceDocs = await db
-      .collection(TEST_FENCE_COLLECTION)
-      .listDocuments();
+    // Track if client has been terminated to prevent race conditions
+    let terminated = false;
 
-    await Promise.all([
-      ...lockDocs.map((doc) => doc.delete()),
-      ...fenceDocs.map((doc) => doc.delete()),
-    ]);
+    // Safe wrapper for collection operations that handles terminated client
+    const safeCleanup = async () => {
+      if (terminated) return;
 
-    return {
-      async cleanup() {
+      try {
         const lockDocs = await db.collection(TEST_COLLECTION).listDocuments();
         const fenceDocs = await db
           .collection(TEST_FENCE_COLLECTION)
@@ -122,10 +120,43 @@ export const firestoreFixture: FirestoreFixture = {
           ...lockDocs.map((doc) => doc.delete()),
           ...fenceDocs.map((doc) => doc.delete()),
         ]);
-      },
+      } catch (error) {
+        // Ignore errors from terminated client or missing collections
+        if (
+          error instanceof Error &&
+          error.message.includes("already been terminated")
+        ) {
+          return;
+        }
+        throw error;
+      }
+    };
+
+    // Initial cleanup
+    await safeCleanup();
+
+    return {
+      cleanup: safeCleanup,
 
       async teardown() {
-        await db.terminate();
+        if (terminated) return;
+        terminated = true;
+
+        // Best-effort cleanup before termination
+        try {
+          await safeCleanup();
+        } catch {
+          // Ignore cleanup errors during teardown
+        }
+
+        try {
+          await Promise.race([
+            db.terminate(),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ]);
+        } catch {
+          // Ignore termination errors
+        }
       },
 
       createBackend() {

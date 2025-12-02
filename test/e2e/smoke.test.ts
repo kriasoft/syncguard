@@ -53,6 +53,11 @@ describe("Smoke Tests", async () => {
       // Firestore tests need longer timeout and retry for network variability
       const slowTestOpts =
         fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
+      // Firestore acquisition settings: longer timeout due to emulator latency
+      const firestoreAcquisitionOpts =
+        fixture.kind === "firestore"
+          ? { timeoutMs: 10000, retryDelayMs: 100 }
+          : { timeoutMs: 2000, retryDelayMs: 10 };
 
       beforeAll(async () => {
         const setup = await fixture.setup();
@@ -107,43 +112,47 @@ describe("Smoke Tests", async () => {
       });
 
       // Mutual exclusion
-      it("prevents concurrent access to same resource", async () => {
-        const key = "smoke:mutex";
-        const events: string[] = [];
+      it(
+        "prevents concurrent access to same resource",
+        async () => {
+          const key = "smoke:mutex";
+          const events: string[] = [];
 
-        const first = lockWithBackend(
-          backend,
-          async () => {
-            events.push("first:start");
-            await Bun.sleep(50);
-            events.push("first:end");
-          },
-          { key, ttlMs: 30000 },
-        );
+          const first = lockWithBackend(
+            backend,
+            async () => {
+              events.push("first:start");
+              await Bun.sleep(50);
+              events.push("first:end");
+            },
+            { key, ttlMs: 30000 },
+          );
 
-        await Bun.sleep(10);
+          await Bun.sleep(10);
 
-        const second = lockWithBackend(
-          backend,
-          async () => {
-            events.push("second:start");
-            await Bun.sleep(10);
-            events.push("second:end");
-          },
-          {
-            key,
-            ttlMs: 30000,
-            acquisition: { timeoutMs: 2000, retryDelayMs: 10 },
-          },
-        );
+          const second = lockWithBackend(
+            backend,
+            async () => {
+              events.push("second:start");
+              await Bun.sleep(10);
+              events.push("second:end");
+            },
+            {
+              key,
+              ttlMs: 30000,
+              acquisition: firestoreAcquisitionOpts,
+            },
+          );
 
-        await Promise.all([first, second]);
+          await Promise.all([first, second]);
 
-        // Second must wait for first to complete
-        expect(events.indexOf("first:end")).toBeLessThan(
-          events.indexOf("second:start"),
-        );
-      });
+          // Second must wait for first to complete
+          expect(events.indexOf("first:end")).toBeLessThan(
+            events.indexOf("second:start"),
+          );
+        },
+        slowTestOpts,
+      );
 
       // TTL expiration
       it(
