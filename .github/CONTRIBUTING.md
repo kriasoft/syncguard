@@ -4,10 +4,11 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ## Prerequisites
 
-- **Bun**: Install from [bun.sh](https://bun.sh)
-- **Docker** (for integration tests): Any recent version
-- **PostgreSQL** (for integration tests): 14+ running on localhost:5432
-- **Node.js**: 20+ (Bun handles this, but good to have)
+- **Node.js** 20+ (matches `engines` in package.json)
+- **Bun** (for install/scripts): [bun.sh](https://bun.sh)
+- **Docker** (optional): Runs Redis via `bun run redis`
+- **PostgreSQL** 14+ on `localhost:5432` (for integration tests)
+- **Firestore emulator** (`bun run firestore`) for Firestore integration tests
 
 ## Quick Start
 
@@ -28,7 +29,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
    ```bash
    bun run test        # Unit tests (fast)
-   bun test            # All tests including integration
+   bun run test:all    # Full suite (unit, integration, performance)
    ```
 
 ## Development Workflow
@@ -43,12 +44,13 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 2. **Write your code** following existing patterns
 3. **Add tests** for new functionality
-4. **Run the full test suite**:
+4. **Validate locally**:
 
    ```bash
-   bun run typecheck   # Type checking
-   bun run format      # Auto-format code
-   bun test            # All tests
+   bun run format      # Prettier
+   bun run typecheck   # Both tsconfig targets
+   bun run test        # Unit tests
+   bun run test:all    # Optional: full suite before PR
    ```
 
 ### Testing Strategy
@@ -71,14 +73,13 @@ bun run test:integration
 
 ### Code Standards
 
-- **Functional style**: Pure functions, immutable data, `const` over `let`, avoid classes
-- **TypeScript**: Strict mode, ESNext target, noUncheckedIndexedAccess
-- **Formatting**: Prettier with default config (auto-runs on commit)
-- **Headers**: SPDX license identifiers required
-- **Exports**: Named exports preferred, tree-shakable modules
-- **JSDoc**: Required for all public APIs
-- **Error handling**: Primary API throws `LockError`, manual ops return `LockResult`
-- **Tests**: Cover new functionality, especially edge cases
+- **TypeScript**: Strict, ESNext, `noUncheckedIndexedAccess` enabled
+- **Formatting**: Prettier (`bun run format`); pre-commit hooks run prettier + targeted `tsc` on touched backend files
+- **Headers**: SPDX license identifiers on source files
+- **Exports**: Prefer named exports; keep modules tree-shakable
+- **Error handling**: Public API throws `LockError` for system errors; mutation ops return `{ ok: boolean }` results
+- **JSDoc**: Required for public APIs
+- **Tests**: Add coverage for new behavior and edge cases
 
 ## Submitting Changes
 
@@ -89,7 +90,7 @@ bun run test:integration
    git commit -m "feat: add your feature description"
    ```
 
-   Pre-commit hooks will automatically format code and run type checks.
+   Pre-commit hooks will format staged files and run targeted type checks.
 
 2. **Push and create PR**:
 

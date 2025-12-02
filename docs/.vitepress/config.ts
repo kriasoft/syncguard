@@ -1,18 +1,24 @@
+// SPDX-FileCopyrightText: 2025-present Kriasoft
+// SPDX-License-Identifier: MIT
+
 import { defineConfig } from "vitepress";
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "🔒 SyncGuard",
   base: "/syncguard/",
+
+  title: "🔒 SyncGuard",
   description:
     "TypeScript distributed lock library that prevents race conditions across services. Because nobody wants their payment processed twice! 💸",
   lang: "en-US",
   lastUpdated: true,
   cleanUrls: true,
+
   sitemap: {
     hostname: "https://kriasoft.com/syncguard/",
     lastmodDateOnly: false,
   },
+
   head: [
     ["link", { rel: "icon", href: "/syncguard/favicon.ico" }],
     ["meta", { name: "theme-color", content: "#3c8772" }],

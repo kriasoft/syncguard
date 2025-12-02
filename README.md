@@ -10,7 +10,7 @@ TypeScript distributed lock library that prevents race conditions across service
 
 ## Requirements
 
-- **Node.js** ≥20.0.0 (for AsyncDisposable/`await using` support; use try/finally on older versions)
+- **Node.js** ≥20.0.0 (targets AsyncDisposable/`await using`; older runtimes require try/finally plus a polyfill, but official support is 20+)
 
 ## Installation
 
@@ -96,6 +96,10 @@ await lock(
 Use `await using` for automatic cleanup on all code paths (Node.js ≥20):
 
 ```typescript
+import { createRedisBackend } from "syncguard/redis";
+import Redis from "ioredis";
+
+const redis = new Redis();
 const backend = createRedisBackend(redis);
 
 // Lock automatically released on scope exit
@@ -241,7 +245,7 @@ const lock = createLock(db, {
 Call `setupSchema(sql)` once during initialization to create required tables and indexes.
 
 **Firestore:**
-Requires a single-field ascending index on the `lockId` field. Create it with:
+Ensure the single-field index on `lockId` remains enabled (Firestore creates these by default). If you have disabled single-field indexes, add one:
 
 ```bash
 gcloud firestore indexes create --collection-group=locks --field-config=field-path=lockId,order=ASCENDING

@@ -1,37 +1,19 @@
-# dependencies (bun install)
+# Dependencies
 node_modules
 
-# output
+# Build output
 dist
-.vitepress/dist
+docs/.vitepress/dist
 *.tgz
 
-# code coverage
-coverage
-*.lcov
-
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-
-**/*.local.md
-
-# caches
+# Caches
 docs/.vitepress/cache
-.eslintcache
-.cache
 *.tsbuildinfo
 
-# IntelliJ based IDEs
-.idea
+# Local files (not committed)
+*.local.md
+*.local.ts
 
-# Finder (MacOS) folder config
+# Editor
+.idea
 .DS_Store

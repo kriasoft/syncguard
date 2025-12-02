@@ -5,31 +5,34 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  id-token: write
-  packages: write
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: production
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # Required for OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
       - uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bun publish --access public --ignore-scripts
+      - run: npm publish --access public --provenance
         working-directory: ./dist
-        env:
-          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

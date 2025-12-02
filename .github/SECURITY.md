@@ -11,9 +11,7 @@
 
 If you discover a security vulnerability in SyncGuard, please report it responsibly:
 
-**DO NOT** open a public issue for security vulnerabilities.
-
-Instead, please email: <security@kriasoft.com>
+**Do not** open a public issue. Email <security@kriasoft.com>.
 
 Include in your report:
 
@@ -32,28 +30,25 @@ Critical vulnerabilities affecting distributed locking integrity will be priorit
 
 ## Security Considerations
 
-SyncGuard handles distributed locking, which is security-sensitive. Key areas:
+SyncGuard is a distributed lock library; safety depends on backend security and correct time authority:
 
-- **Lock integrity**: Preventing unauthorized lock acquisition/release (enforced via cryptographically strong lockIds)
-- **Fencing tokens**: Monotonic counters prevent stale lock holders from corrupting data
-- **TOCTOU protection**: Atomic operations prevent race conditions (ADR-003)
-- **Timing attacks**: 1000ms unified tolerance provides predictable behavior (ADR-005)
-- **Backend security**: Proper configuration of Redis/Firestore credentials
-- **Dependencies**: Regular updates to prevent supply chain attacks
+- **Ownership enforcement**: Lock IDs are cryptographically strong; backends enforce ownership on release/extend.
+- **Fencing tokens**: Use fence values to reject stale writers; all backends return monotonic 15-digit tokens.
+- **TOCTOU protection**: Acquire/release/extend are atomic (ADR-003); avoid out-of-band deletes.
+- **Time authority**: Redis/PostgreSQL use server time; Firestore uses client time—ensure NTP on clients.
+- **Backend security**: Configure Redis/PostgreSQL/Firestore with authentication and TLS where available.
+- **Dependencies**: Keep dependencies current to reduce supply chain risk.
 
 ## Best Practices
 
 When using SyncGuard:
 
-1. **Secure your backends**: Use proper authentication for Redis/Firestore
-2. **Network security**: Use TLS/SSL for backend connections in production
-3. **Access control**: Limit who can acquire/release locks through backend permissions
-4. **Monitoring**: Use `withTelemetry()` decorator for audit trails (opt-in)
-5. **Key management**: Use non-predictable lock keys when needed
-6. **Fencing tokens**: Use fence tokens to prevent stale writes in critical operations
-7. **Time synchronization**: Ensure NTP sync for Firestore backends (±500ms accuracy)
-8. **Key validation**: Leverage `normalizeAndValidateKey()` and `validateLockId()` helpers
-9. **Error handling**: Catch `LockError` for system failures, handle contention via result types
+1. **Secure backends**: Enforce auth and TLS for Redis/PostgreSQL/Firestore; restrict network access.
+2. **Least privilege**: Limit who can acquire/release locks via backend permissions.
+3. **Use fencing**: Pass fence tokens to downstream writes to block stale actors.
+4. **Monitor cleanup**: Provide `onReleaseError` hooks and/or `withTelemetry()` for observability.
+5. **Keys**: Use non-guessable keys for sensitive resources; validate via helpers where applicable.
+6. **Clock sync**: Keep NTP running on clients when using Firestore (client time authority).
 
 ## Disclosure Policy
 
@@ -61,14 +56,6 @@ When using SyncGuard:
 - Credit will be given to security researchers (with permission)
 - CVE numbers will be requested for significant vulnerabilities
 
-## Responsible Disclosure
-
-We appreciate security researchers who help keep SyncGuard secure. If you report a valid security issue:
-
-- We'll acknowledge your contribution in the release notes (with your permission)
-- Critical issues affecting lock integrity will receive emergency patches
-- We'll coordinate disclosure timing with you
-
 ---
 
-**This policy may be updated as the project evolves. Last updated: 2025-10-16**
+**This policy may be updated as the project evolves. Last updated: 2025-12-02**
