@@ -15,10 +15,10 @@
 import type { Firestore } from "@google-cloud/firestore";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Redis } from "ioredis";
-import type { LockBackend } from "../../common";
-import { LockError } from "../../common/errors.js";
-import { createFirestoreBackend } from "../../firestore/backend";
-import { createRedisBackend } from "../../redis/backend";
+import type { LockBackend } from "../../../common";
+import { LockError } from "../../../common/errors.js";
+import { createFirestoreBackend } from "../../../firestore/backend";
+import { createRedisBackend } from "../../../redis/backend";
 
 describe("LockId Format Validation (interface.md lines 729-730)", () => {
   // Mock clients for validation testing

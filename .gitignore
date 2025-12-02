@@ -6,6 +6,9 @@ dist
 docs/.vitepress/dist
 *.tgz
 
+# Logs
+*.log
+
 # Caches
 docs/.vitepress/cache
 *.tsbuildinfo

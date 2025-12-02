@@ -2,27 +2,30 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * Enforcement tests for TIME_TOLERANCE_MS constant usage.
+ * Time helper functions tests
+ *
+ * Tests for time-related utilities:
+ * - TIME_TOLERANCE_MS constant and enforcement
+ * - isLive predicate for liveness checking
+ * - calculateRedisServerTimeMs for Redis TIME command
  *
  * Per specs/interface.md:
  * - TIME_TOLERANCE_MS in common/time-predicates.ts is the NORMATIVE SOURCE
  * - All backends MUST import and use this constant
  * - Backends MUST NOT hard-code alternative tolerance values
- * - Tests MUST fail if any backend uses a different tolerance value
- *
- * These tests verify compliance by inspecting source code to ensure:
- * 1. No hard-coded tolerance values (e.g., literal 1000) in backend operations
- * 2. All backend operations import TIME_TOLERANCE_MS from common/time-predicates
- * 3. Cross-backend consistency in tolerance usage
  */
 
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { TIME_TOLERANCE_MS } from "../../common/time-predicates.js";
+import {
+  TIME_TOLERANCE_MS,
+  calculateRedisServerTimeMs,
+  isLive,
+} from "../../../common/time-predicates.js";
 
-describe("TIME_TOLERANCE_MS Enforcement", () => {
-  describe("Constant Definition", () => {
-    it("should be defined as 1000ms in common/time-predicates.ts", () => {
+describe("Time Helper Functions", () => {
+  describe("TIME_TOLERANCE_MS Constant", () => {
+    it("should be defined as 1000ms", () => {
       expect(TIME_TOLERANCE_MS).toBe(1000);
     });
 
@@ -35,6 +38,96 @@ describe("TIME_TOLERANCE_MS Enforcement", () => {
     });
   });
 
+  describe("isLive Predicate", () => {
+    it("should implement consistent liveness predicate", () => {
+      const now = Date.now();
+      const expired = now - 5000; // 5 seconds ago
+      const live = now + 5000; // 5 seconds from now
+
+      // With 1000ms tolerance, something expired 5 seconds ago is definitely expired
+      expect(isLive(expired, now, TIME_TOLERANCE_MS)).toBe(false);
+
+      // Something expiring 5 seconds from now is definitely live
+      expect(isLive(live, now, TIME_TOLERANCE_MS)).toBe(true);
+
+      // Edge case: expired 500ms ago but within tolerance
+      const recentlyExpired = now - 500;
+      expect(isLive(recentlyExpired, now, TIME_TOLERANCE_MS)).toBe(true);
+    });
+
+    it("should consider lock live if it expired within tolerance window", () => {
+      const now = 1000000;
+      const tolerance = 1000;
+
+      // Expired 500ms ago (within tolerance)
+      expect(isLive(now - 500, now, tolerance)).toBe(true);
+
+      // Expired exactly at tolerance boundary (NOT live, because > not >=)
+      expect(isLive(now - tolerance, now, tolerance)).toBe(false);
+
+      // Expired 999ms ago (within tolerance, still live)
+      expect(isLive(now - tolerance + 1, now, tolerance)).toBe(true);
+
+      // Expired 1001ms ago (outside tolerance)
+      expect(isLive(now - tolerance - 1, now, tolerance)).toBe(false);
+    });
+
+    it("should handle edge cases correctly", () => {
+      const now = 1000000;
+      const tolerance = 1000;
+
+      // Future expiry (definitely live)
+      expect(isLive(now + 5000, now, tolerance)).toBe(true);
+
+      // Expiry exactly at now (live due to tolerance)
+      expect(isLive(now, now, tolerance)).toBe(true);
+
+      // Very old expiry (definitely expired)
+      expect(isLive(now - 10000, now, tolerance)).toBe(false);
+    });
+  });
+
+  describe("calculateRedisServerTimeMs", () => {
+    it("should correctly calculate Redis server time", () => {
+      const seconds = "1640995200"; // 2022-01-01 00:00:00 UTC
+      const microseconds = "123456";
+
+      const result = calculateRedisServerTimeMs([seconds, microseconds]);
+      const expected =
+        parseInt(seconds) * 1000 + Math.floor(parseInt(microseconds) / 1000);
+
+      expect(result).toBe(expected);
+      expect(result).toBe(1640995200123); // Precise calculation
+    });
+
+    it("should handle zero microseconds", () => {
+      const seconds = "1640995200";
+      const microseconds = "0";
+
+      const result = calculateRedisServerTimeMs([seconds, microseconds]);
+      expect(result).toBe(1640995200000);
+    });
+
+    it("should handle maximum microseconds", () => {
+      const seconds = "1640995200";
+      const microseconds = "999999"; // Max microseconds in a second
+
+      const result = calculateRedisServerTimeMs([seconds, microseconds]);
+      expect(result).toBe(1640995200999);
+    });
+
+    it("should truncate microseconds correctly", () => {
+      const seconds = "1640995200";
+      const microseconds = "123456"; // 123.456 milliseconds
+
+      const result = calculateRedisServerTimeMs([seconds, microseconds]);
+      // Should truncate to 123 milliseconds (not round)
+      expect(result).toBe(1640995200123);
+    });
+  });
+});
+
+describe("TIME_TOLERANCE_MS Enforcement Across Backends", () => {
   describe("Firestore Backend Compliance", () => {
     const firestoreOperations = [
       "firestore/operations/acquire.ts",
@@ -196,10 +289,10 @@ describe("TIME_TOLERANCE_MS Enforcement", () => {
       // Import from actual backend operations to verify they use the same constant
       const {
         TIME_TOLERANCE_MS: firestoreTolerance,
-      } = require("../../common/time-predicates.js");
+      } = require("../../../common/time-predicates.js");
       const {
         TIME_TOLERANCE_MS: redisTolerance,
-      } = require("../../common/time-predicates.js");
+      } = require("../../../common/time-predicates.js");
 
       expect(firestoreTolerance).toBe(redisTolerance);
       expect(firestoreTolerance).toBe(1000);
