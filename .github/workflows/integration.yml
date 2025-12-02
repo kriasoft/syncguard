@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   packages: read
+  id-token: write
 
 jobs:
   contracts:
@@ -90,9 +91,9 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/lcov.info
           flags: contracts-${{ matrix.backend }}
+          use_oidc: true
           fail_ci_if_error: false
 
       - name: Kill Firestore emulator
@@ -161,16 +162,18 @@ jobs:
         run: |
           for i in {1..30}; do nc -z 127.0.0.1 6379 && break || sleep 1; done
           for i in {1..60}; do nc -z 127.0.0.1 5432 && break || sleep 1; done
+          # Wait for Firestore emulator port, then additional warmup for full readiness
           for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
+          sleep 5
 
       - run: bun run test:e2e:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/lcov.info
           flags: e2e
+          use_oidc: true
           fail_ci_if_error: false
 
       - name: Kill Firestore emulator
