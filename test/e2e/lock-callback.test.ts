@@ -320,7 +320,7 @@ describe("E2E: Lock Callback Pattern", async () => {
         // Should complete in parallel, not sequential
         // Firestore: ~1-3s due to HTTP round-trips, Redis/Postgres: ~100ms
         expect(elapsed).toBeLessThan(maxParallelTime);
-      });
+      }, 10000);
 
       it("should execute callback with void return", async () => {
         const key = "callback:void";
