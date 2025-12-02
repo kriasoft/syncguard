@@ -66,8 +66,16 @@ jobs:
       - name: Wait for Firestore (8080)
         run: for i in {1..60}; do nc -z 127.0.0.1 8080 && break || sleep 1; done
 
-      - run: bun run test:integration
+      - run: bun run test:integration:coverage
       - run: bun run test:performance
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: integration
+          fail_ci_if_error: false
 
       - name: Kill Firestore emulator
         if: always()

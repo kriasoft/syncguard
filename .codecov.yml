@@ -1,0 +1,51 @@
+# .codecov.yml — Coverage configuration for SyncGuard
+# https://docs.codecov.com/docs/codecov-yaml
+
+codecov:
+  require_ci_to_pass: yes
+  notify:
+    after_n_builds: 2
+
+coverage:
+  precision: 2
+  round: down
+  range: 70..100
+
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        base: auto
+    patch:
+      default:
+        target: 77%
+        threshold: 1%
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: no
+
+ignore:
+  - "dist/"
+  - "docs/"
+  - "test/"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+
+flags:
+  unit:
+    paths:
+      - "common/"
+      - "redis/"
+      - "postgres/"
+      - "firestore/"
+    carryforward: true
+  integration:
+    paths:
+      - "common/"
+      - "redis/"
+      - "postgres/"
+      - "firestore/"
+    carryforward: true
