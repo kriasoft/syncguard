@@ -23,6 +23,12 @@ jobs:
         with:
           bun-version: ${{ matrix.bun-version }}
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run build
@@ -43,6 +49,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - run: bun install --frozen-lockfile
       - run: bun run prettier --check .

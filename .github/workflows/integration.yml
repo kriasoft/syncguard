@@ -55,6 +55,12 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
       - name: Setup Java (for Firestore)
         if: matrix.backend == 'firestore'
         uses: actions/setup-java@v5
@@ -133,6 +139,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
       - uses: actions/setup-java@v5
         with:
           distribution: "temurin"
@@ -195,6 +208,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - run: bun install --frozen-lockfile
       - run: bun run build
