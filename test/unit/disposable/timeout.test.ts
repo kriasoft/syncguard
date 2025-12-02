@@ -229,6 +229,81 @@ describe("Disposal Timeout", () => {
     });
   });
 
+  it("should invoke error callback when release fails before timeout", async () => {
+    const onReleaseErrorSpy = mock<OnReleaseError>();
+    const releaseError = new Error("Connection refused");
+
+    // Release fails immediately (before timeout would trigger)
+    (mockBackend.release as ReturnType<typeof mock>).mockRejectedValue(
+      releaseError,
+    );
+
+    const handle = createDisposableHandle(
+      mockBackend,
+      mockAcquireResult,
+      "test-key",
+      onReleaseErrorSpy,
+      5000, // Long timeout - release fails before it triggers
+    );
+
+    await handle[Symbol.asyncDispose]();
+
+    // Error callback should be invoked with the release error
+    expect(onReleaseErrorSpy).toHaveBeenCalledTimes(1);
+    expect(onReleaseErrorSpy).toHaveBeenCalledWith(releaseError, {
+      lockId: "test-lock-timeout",
+      key: "test-key",
+      source: "disposal",
+    });
+  });
+
+  it("should invoke error callback for deferred release failure after timeout", async () => {
+    const onReleaseErrorSpy = mock<OnReleaseError>();
+    const releaseError = new Error("Deferred connection error");
+
+    // Release hangs, then fails after timeout fires
+    let rejectRelease: (err: Error) => void;
+    (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
+      () =>
+        new Promise<ReleaseResult>((_, reject) => {
+          rejectRelease = reject;
+        }),
+    );
+
+    const handle = createDisposableHandle(
+      mockBackend,
+      mockAcquireResult,
+      "test-key",
+      onReleaseErrorSpy,
+      50, // Short timeout
+    );
+
+    const disposalPromise = handle[Symbol.asyncDispose]();
+
+    // Wait for timeout to fire
+    await Bun.sleep(100);
+
+    // Disposal should complete (timeout fired)
+    await disposalPromise;
+
+    // No error yet - release is still pending
+    expect(onReleaseErrorSpy).not.toHaveBeenCalled();
+
+    // Now release fails (fire-and-forget path)
+    rejectRelease!(releaseError);
+
+    // Give the fire-and-forget handler time to run
+    await Bun.sleep(10);
+
+    // Error callback should be invoked for the deferred failure
+    expect(onReleaseErrorSpy).toHaveBeenCalledTimes(1);
+    expect(onReleaseErrorSpy).toHaveBeenCalledWith(releaseError, {
+      lockId: "test-lock-timeout",
+      key: "test-key",
+      source: "disposal",
+    });
+  });
+
   it("should work with decorateAcquireResult", async () => {
     const onReleaseErrorSpy = mock<OnReleaseError>();
 

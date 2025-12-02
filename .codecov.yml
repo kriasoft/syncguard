@@ -4,9 +4,9 @@
 codecov:
   require_ci_to_pass: yes
   notify:
-    # Wait for all 6 coverage uploads before reporting:
-    # 2 unit (latest + canary) + 3 contracts (redis, postgres, firestore) + 1 e2e
-    after_n_builds: 6
+    # Wait for all 5 coverage uploads before reporting:
+    # 1 unit + 3 contracts (redis, postgres, firestore) + 1 e2e
+    after_n_builds: 5
 
 coverage:
   precision: 2
