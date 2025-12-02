@@ -239,4 +239,132 @@ describe("Concurrent Disposal and Re-entry", () => {
     // Backend should be called exactly once
     expect(mockBackend.release).toHaveBeenCalledTimes(1);
   });
+
+  it("should wait for in-flight release() when dispose() is called", async () => {
+    // This tests the race condition where release() starts first,
+    // then dispose() is called while release() is still awaiting backend
+    let releaseStarted = false;
+    let releaseCompleted = false;
+
+    (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseStarted = true;
+          setTimeout(() => {
+            releaseCompleted = true;
+            resolve({ ok: true });
+          }, 100);
+        }),
+    );
+
+    const handle = createDisposableHandle(
+      mockBackend,
+      mockAcquireResult,
+      "test-key",
+    );
+
+    // Start manual release (don't await yet)
+    const releasePromise = handle.release();
+
+    // Wait for release to start but not complete
+    await Bun.sleep(10);
+    expect(releaseStarted).toBe(true);
+    expect(releaseCompleted).toBe(false);
+
+    // Call dispose while release is in-flight
+    const disposePromise = handle[Symbol.asyncDispose]();
+
+    // dispose() should NOT return null - it should wait for release
+    expect(disposePromise).toBeInstanceOf(Promise);
+
+    // Wait for dispose to complete
+    await disposePromise;
+
+    // Release should have completed by now
+    expect(releaseCompleted).toBe(true);
+
+    // Verify release also completes successfully
+    const releaseResult = await releasePromise;
+    expect(releaseResult.ok).toBe(true);
+
+    // Backend should be called exactly once
+    expect(mockBackend.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("should handle dispose() during failing release()", async () => {
+    // Test that dispose() waits for release() even when it fails
+    const releaseError = new Error("Network failure");
+    const onReleaseErrorSpy = mock<OnReleaseError>();
+    let releaseStarted = false;
+
+    (mockBackend.release as ReturnType<typeof mock>).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          releaseStarted = true;
+          setTimeout(() => reject(releaseError), 50);
+        }),
+    );
+
+    const handle = createDisposableHandle(
+      mockBackend,
+      mockAcquireResult,
+      "test-key",
+      onReleaseErrorSpy,
+    );
+
+    // Start manual release (don't await yet)
+    const releasePromise = handle.release();
+
+    // Wait for release to start
+    await Bun.sleep(10);
+    expect(releaseStarted).toBe(true);
+
+    // Call dispose while release is in-flight
+    const disposePromise = handle[Symbol.asyncDispose]();
+
+    // dispose() should wait and complete without throwing
+    await disposePromise;
+
+    // release() should throw
+    await expect(releasePromise).rejects.toThrow("Network failure");
+
+    // Backend called once, no error callback (release() throws, doesn't swallow)
+    expect(mockBackend.release).toHaveBeenCalledTimes(1);
+    expect(onReleaseErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it("should handle synchronous throw from backend.release()", async () => {
+    // Test that synchronous throws (e.g., validation failures) don't leave
+    // state stuck at "disposing" with null pendingRelease
+    const syncError = new Error("Synchronous validation failure");
+
+    (mockBackend.release as ReturnType<typeof mock>).mockImplementation(() => {
+      throw syncError; // Throws synchronously, not returning a promise
+    });
+
+    const handle = createDisposableHandle(
+      mockBackend,
+      mockAcquireResult,
+      "test-key",
+    );
+
+    // release() should throw synchronously
+    await expect(handle.release()).rejects.toThrow(
+      "Synchronous validation failure",
+    );
+
+    // State should be "disposed", not stuck at "disposing"
+    // Verify by calling dispose() - it should be a no-op (state === "disposed")
+    await handle[Symbol.asyncDispose]();
+
+    // Backend should have been called once (the failing call)
+    expect(mockBackend.release).toHaveBeenCalledTimes(1);
+
+    // Subsequent release() should return { ok: false } (idempotent)
+    const secondRelease = await handle.release();
+    expect(secondRelease.ok).toBe(false);
+
+    // No additional backend calls
+    expect(mockBackend.release).toHaveBeenCalledTimes(1);
+  });
 });

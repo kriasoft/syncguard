@@ -244,3 +244,39 @@ describe("createDisposableHandle", () => {
     });
   });
 });
+
+describe("acquireHandle", () => {
+  // Import here to avoid polluting the main describe scope
+  const { acquireHandle } = require("../../../common/disposable.js");
+
+  it("should throw if backend returns undecorated result", async () => {
+    // Mock a backend that returns raw AcquireResult without decoration
+    const rawBackend = {
+      acquire: async () => ({
+        ok: true,
+        lockId: "raw-lock-123",
+        expiresAtMs: Date.now() + 30000,
+        // Missing: release(), extend(), [Symbol.asyncDispose]()
+      }),
+    };
+
+    await expect(
+      acquireHandle(rawBackend, { key: "test", ttlMs: 30000 }),
+    ).rejects.toThrow(/Backend\.acquire\(\) must return a decorated result/);
+  });
+
+  it("should pass through failed acquisition without validation", async () => {
+    const rawBackend = {
+      acquire: async () => ({
+        ok: false,
+        reason: "locked" as const,
+      }),
+    };
+
+    const result = await acquireHandle(rawBackend, {
+      key: "test",
+      ttlMs: 30000,
+    });
+    expect(result.ok).toBe(false);
+  });
+});

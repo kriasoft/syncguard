@@ -228,6 +228,9 @@ export function createDisposableHandle<C extends BackendCapabilities>(
   type State = "active" | "disposing" | "disposed";
   let state: State = "active";
   let disposePromise: Promise<void> | null = null;
+  // Track in-flight release() so dispose() can wait for it (fixes race condition
+  // where dispose() was called while release() awaited backend, returning null)
+  let pendingRelease: Promise<void> | null = null;
 
   const handle: DisposableLockHandle = {
     async release(signal?: AbortSignal): Promise<ReleaseResult> {
@@ -241,20 +244,33 @@ export function createDisposableHandle<C extends BackendCapabilities>(
       // even if the call throws (network error, timeout, etc.)
       state = "disposing";
 
+      // Store promise BEFORE await so dispose() can wait for it if called concurrently.
+      // Wrap in try/catch to handle synchronous throws (e.g., validation failures).
+      let releaseOp: Promise<ReleaseResult>;
       try {
-        // Throw on errors for consistency with backend API
-        // Only disposal swallows errors (see asyncDispose below)
-        const releaseResult = await backend.release({
+        releaseOp = backend.release({
           lockId: result.lockId,
           signal,
         });
-        state = "disposed";
-        return releaseResult;
       } catch (error) {
-        // Release failed - mark as disposed anyway (at-most-once semantics)
+        // Synchronous throw - mark disposed to maintain at-most-once semantics
         state = "disposed";
         throw error;
       }
+
+      pendingRelease = releaseOp.then(
+        () => {
+          state = "disposed";
+        },
+        () => {
+          state = "disposed";
+        },
+      );
+
+      // Throw on errors for consistency with backend API
+      // Only disposal swallows errors (see asyncDispose below)
+      // State is set to "disposed" by pendingRelease handler on both success/failure
+      return releaseOp;
     },
 
     async extend(ttlMs: number, signal?: AbortSignal): Promise<ExtendResult> {
@@ -269,8 +285,14 @@ export function createDisposableHandle<C extends BackendCapabilities>(
         return;
       }
 
-      // Re-entry during disposal: return same promise (idempotent)
+      // Re-entry during disposal: wait for in-flight operation
       if (state === "disposing") {
+        // If release() initiated disposal, wait for it (pendingRelease is set)
+        // If dispose() initiated, wait for disposePromise
+        if (pendingRelease) {
+          await pendingRelease;
+          return;
+        }
         return disposePromise!;
       }
 
@@ -493,7 +515,18 @@ export async function acquireHandle<C extends BackendCapabilities>(
     return result;
   }
 
-  // Result is already decorated by backend, just return it
-  // Type assertion safe here since we checked ok: true
+  // Validate backend returned decorated result (catches misconfigured mocks)
+  const lock = result as AsyncLock<C>;
+  if (
+    typeof lock.release !== "function" ||
+    typeof lock.extend !== "function" ||
+    typeof lock[Symbol.asyncDispose] !== "function"
+  ) {
+    throw new Error(
+      "Backend.acquire() must return a decorated result. " +
+        "Use decorateAcquireResult() or implement LockBackend correctly.",
+    );
+  }
+
   return result as AsyncLock<C>;
 }
