@@ -4,7 +4,7 @@
 /**
  * Example usage patterns for distributed locks with Firestore backend.
  * Demonstrates auto-managed locks, manual control, and common patterns.
- * @see specs/interface.md for complete API reference
+ * @see docs/specs/interface.md for complete API reference
  */
 
 import { Firestore } from "@google-cloud/firestore";

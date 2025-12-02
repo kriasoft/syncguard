@@ -5,8 +5,8 @@
  * SyncGuard - Distributed Lock Library
  *
  * Core exports for custom backend implementations and lock helper API.
- * See: specs/interface.md for complete API contracts and usage patterns.
- * See: specs/adrs.md for architectural decisions (telemetry, retry logic).
+ * See: docs/specs/interface.md for complete API contracts and usage patterns.
+ * See: docs/adr/ for architectural decisions (telemetry, retry logic).
  */
 
 // Core Types

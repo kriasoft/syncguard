@@ -82,9 +82,9 @@ export const BACKEND_LIMITS = {
  * const fenceDocId = makeStorageKey("", `fence:${baseKey}`, BACKEND_LIMITS.FIRESTORE, RESERVE_BYTES.FIRESTORE);
  * ```
  *
- * @see specs/redis-backend.md#dual-key-storage-pattern - Redis reserve bytes calculation
- * @see specs/postgres-backend.md#lock-table-requirements - PostgreSQL reserve bytes (0) rationale
- * @see specs/firestore-backend.md#lock-documents - Firestore reserve bytes (0) rationale
+ * @see docs/specs/redis-backend.md#dual-key-storage-pattern - Redis reserve bytes calculation
+ * @see docs/specs/postgres-backend.md#lock-table-requirements - PostgreSQL reserve bytes (0) rationale
+ * @see docs/specs/firestore-backend.md#lock-documents - Firestore reserve bytes (0) rationale
  */
 export const RESERVE_BYTES = {
   /**
@@ -137,8 +137,6 @@ export const LOCK_DEFAULTS = {
  * and precision safety within Lua's 53-bit float (2^53-1 ≈ 9.007e15).
  *
  * **Capacity**: 10^15 fence tokens = ~31.7 years at 1M locks/sec.
- *
- * @see specs/adrs.md ADR-004 - Fence token format and overflow handling
  */
 export const FENCE_THRESHOLDS = {
   /**

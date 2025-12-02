@@ -48,8 +48,7 @@ import type {
  * @param config - PostgreSQL backend configuration
  * @returns Lookup operation function
  *
- * @see specs/interface.md#lookup-operation-requirements - Normative requirements
- * @see specs/adrs.md ADR-011 - Non-atomic lookup rationale
+ * @see docs/specs/interface.md#lookup-operation-requirements - Normative requirements
  */
 export function createLookupOperation(sql: Sql, config: PostgresConfig) {
   return async (

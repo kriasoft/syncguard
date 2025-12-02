@@ -381,10 +381,10 @@ if (owned) {
 - For raw data access, use `getByKeyRaw()` or `getByIdRaw()` helpers
 - Read-only operation (no side effects)
 - Includes `fence` for fencing-capable backends
-- **Atomicity:** Redis uses atomic Lua scripts for lockId lookup (multi-key reads); Firestore uses non-atomic indexed queries with post-read verification (per ADR-011, both approaches ensure portability for diagnostic use)
+- **Atomicity:** Redis uses atomic Lua scripts for lockId lookup (multi-key reads); Firestore uses non-atomic indexed queries with post-read verification (per [ADR-011](https://github.com/kriasoft/syncguard/blob/main/docs/adr/011-relaxed-lookup-atomicity.md), both approaches ensure portability for diagnostic use)
 
 ::: warning Diagnostic Use Only
-Lookup is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `lookup() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations (ADR-003).
+Lookup is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `lookup() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations ([ADR-003](https://github.com/kriasoft/syncguard/blob/main/docs/adr/003-explicit-ownership-verification.md)).
 :::
 
 ---
@@ -520,7 +520,7 @@ interface LockInfoDebug<C extends BackendCapabilities> extends LockInfo<C> {
 
 ### `Fence`
 
-Fencing token type (15-digit zero-padded string per ADR-004).
+Fencing token type (15-digit zero-padded string per [ADR-004](https://github.com/kriasoft/syncguard/blob/main/docs/adr/004-lexicographic-fence-comparison.md)).
 
 ```typescript
 type Fence = string; // e.g., "000000000000001"
@@ -821,7 +821,7 @@ function owns<C extends BackendCapabilities>(
 ```
 
 ::: warning Diagnostic Use Only
-This is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `owns() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations (ADR-003).
+This is for **diagnostics, UI, and monitoring** — NOT a correctness guard. Never use `owns() → mutate` patterns. Correctness relies on atomic ownership verification built into `release()` and `extend()` operations ([ADR-003](https://github.com/kriasoft/syncguard/blob/main/docs/adr/003-explicit-ownership-verification.md)).
 :::
 
 **Usage:**
@@ -1221,5 +1221,5 @@ console.log(RESERVE_BYTES.REDIS); // 26
 ```
 
 ::: info Internal Constant
-`TIME_TOLERANCE_MS = 1000` is an internal constant used by all backends for consistent liveness checks. It's not exported or user-configurable (ADR-005). Redis, PostgreSQL, and Firestore use the same 1000ms tolerance automatically.
+`TIME_TOLERANCE_MS = 1000` is an internal constant used by all backends for consistent liveness checks. It's not exported or user-configurable ([ADR-005](https://github.com/kriasoft/syncguard/blob/main/docs/adr/005-unified-time-tolerance.md)). Redis, PostgreSQL, and Firestore use the same 1000ms tolerance automatically.
 :::

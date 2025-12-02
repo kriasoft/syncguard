@@ -6,7 +6,7 @@ import type { RedisBackendOptions, RedisConfig } from "./types.js";
 
 /**
  * Default configuration for Redis backend.
- * @see specs/redis-backend.md
+ * @see docs/specs/redis-backend.md
  */
 export const REDIS_DEFAULTS = {
   /** Key prefix for Redis lock entries */
@@ -27,7 +27,7 @@ export function createRedisConfig(
   const keyPrefix = options.keyPrefix ?? REDIS_DEFAULTS.keyPrefix;
 
   // CRITICAL: Validate keyPrefix doesn't create namespace overlap with fence counters
-  // Per specs/redis-backend.md: Cleanup MUST ONLY delete lock data keys, never fence counter keys
+  // Per docs/specs/redis-backend.md: Cleanup MUST ONLY delete lock data keys, never fence counter keys
   // Fence keys use pattern: ${keyPrefix}:fence:*
   // Lock data uses pattern: ${keyPrefix}:* (main) and ${keyPrefix}:id:* (index)
   // This validation ensures fence keys are distinct from lock data keys

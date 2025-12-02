@@ -9,7 +9,7 @@ See [Fence Counter Lifecycle](#fence-counter-lifecycle) section for complete det
 :::
 
 ::: tip Technical Specifications
-For backend implementers: See [specs/firestore-backend.md](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md) for complete implementation requirements, transaction patterns, and architecture decisions.
+For backend implementers: See [docs/specs/firestore-backend.md](https://github.com/kriasoft/syncguard/blob/main/docs/specs/firestore-backend.md) for complete implementation requirements, transaction patterns, and architecture decisions.
 :::
 
 ## Installation
@@ -125,7 +125,7 @@ Firestore uses **client time** for expiration checks. NTP synchronization is **r
 - **Health Checks (REQUIRED)**: Add application-level health checks that detect and alert on clock skew
 - **Non-configurable**: Tolerance is internal and cannot be changed to prevent semantic drift
 
-**Operational Policy**: See [specs/firestore-backend.md § Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) for the complete operational policy ladder (target/warn/block thresholds) and their relationship to TIME_TOLERANCE_MS.
+**Operational Policy**: See [docs/specs/firestore-backend.md § Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/docs/specs/firestore-backend.md#firestore-clock-sync-requirements) for the complete operational policy ladder (target/warn/block thresholds) and their relationship to TIME_TOLERANCE_MS.
 
 ### Checking Time Sync
 
@@ -138,7 +138,7 @@ timedatectl status
 ```
 
 ::: danger Production Requirement
-If reliable time synchronization cannot be guaranteed, **use Redis backend instead**. See the [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) spec for specific deployment and monitoring thresholds.
+If reliable time synchronization cannot be guaranteed, **use Redis backend instead**. See the [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/docs/specs/firestore-backend.md#firestore-clock-sync-requirements) spec for specific deployment and monitoring thresholds.
 :::
 
 ### Why Client Time?
@@ -224,7 +224,7 @@ await db.collection("fence_counters").doc(docId).delete(); // Violates fencing s
 **Configuration Safety**: The backend validates that `fenceCollection` differs from `collection` to prevent accidental deletion. Attempting to use the same collection for both will throw `LockError("InvalidArgument")`.
 
 ::: info Dual Document Pattern
-See [specs/firestore-backend.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#fencing-token-implementation-pattern) for the complete dual-document pattern specification and atomic transaction requirements.
+See [docs/specs/firestore-backend.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/docs/specs/firestore-backend.md#fencing-token-implementation-pattern) for the complete dual-document pattern specification and atomic transaction requirements.
 :::
 
 ## Common Patterns
@@ -361,7 +361,7 @@ RUN apt-get update && apt-get install -y ntpdate
 - Locks never expire despite TTL passing
 - `extend()` operations fail with "expired" errors
 
-**Solution**: Verify all servers have NTP sync within operational thresholds. See [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/firestore-backend.md#firestore-clock-sync-requirements) for deployment policy (target/warn/block thresholds).
+**Solution**: Verify all servers have NTP sync within operational thresholds. See [Clock Synchronization Requirements](https://github.com/kriasoft/syncguard/blob/main/docs/specs/firestore-backend.md#firestore-clock-sync-requirements) for deployment policy (target/warn/block thresholds).
 
 ### Transaction Conflicts
 

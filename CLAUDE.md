@@ -1,92 +1,53 @@
-# SyncGuard - Distributed Lock Library
+# SyncGuard — Distributed Lock Library
 
-TypeScript library for preventing race conditions across microservices using Redis, PostgreSQL, or Firestore backends.
+TypeScript locks for Redis, PostgreSQL, and Firestore.
 
-## Commands
+Docs:
+
+- Specs in `docs/specs/` (start with `interface.md`, then backend deltas, ADRs in `docs/adr/000-template` and `003`–`016`) — see `docs/specs/README.md`
+- VitePress site: <https://kriasoft.com/syncguard/>
+
+Commands:
 
 ```bash
-bun run build      # Build to dist/
-bun run typecheck  # Type check without emit
-bun run format     # Prettier auto-format
-bun run dev        # Watch mode
+bun run build      # build dist/
+bun run typecheck  # type check
+bun run format     # prettier
+bun run dev        # watch mode
 ```
 
-## Architecture
+Architecture:
 
-### Core API Design
+- Core API and types → `docs/specs/interface.md`
+- Project layout: `index.ts` (public API), `common/` (shared utilities), `redis/`, `postgres/`, `firestore/` (backends; each has README), `docs/` (specs + ADRs)
 
-See `specs/interface.md` for complete API examples, usage patterns, LockBackend interface specification, and type definitions.
+Implementation guardrails:
 
-### Project Structure
+- Follow `docs/specs/interface.md` plus backend specs (`redis-backend.md`, `postgres-backend.md`, `firestore-backend.md`)
+- Backend specs restate inherited requirements (ADR-012) and add storage schema, atomicity, error mapping, TTL, and perf notes
+- Atomic mutations; TOCTOU-safe release/extend; key- and lockId-based `lookup()`; reuse `common/time-predicates.ts:isLive`
 
-```text
-Core:
-  index.ts               → Public API exports for custom backends
-  common/                → Shared utilities, types, and core functionality
-    (See common/README.md for detailed structure)
+Principles:
 
-Backends:
-  redis/                 → Redis backend implementation (see redis/README.md)
-  postgres/              → PostgreSQL backend implementation (see postgres/README.md)
-  firestore/             → Firestore backend implementation (see firestore/README.md)
+- Predictable, composable APIs; smallest practical surface
+- Correctness and safety over micro-optimizations; testability first
+- Record decisions as ADRs while working, not after
 
-Documentation:
-  specs/                 → Technical specifications
-    README.md            → Spec navigation & reading order
-    interface.md         → LockBackend API contracts & usage examples
-    redis-backend.md     → Redis backend specification
-    postgres-backend.md  → PostgreSQL backend specification
-    firestore-backend.md → Firestore backend specification
-    adrs.md              → Architectural decision records
-  docs/                  → Documentation site (https://kriasoft.com/syncguard/)
-```
+Module exports:
 
-## Implementation Requirements
+- `syncguard` main types/utilities; subpaths: `syncguard/redis`, `syncguard/postgres`, `syncguard/firestore`, `syncguard/common` (ESM with d.ts)
 
-**Backend-specific requirements**: See `specs/interface.md`, `specs/redis-backend.md`, `specs/postgres-backend.md`, and `specs/firestore-backend.md`
+Testing:
 
-### Key Design Principles
+- Unit: `bun run test:unit`
+- Build/typecheck: `bun run build && bun run typecheck`
+- Integration: `bun run test:integration` (needs Redis 6379, Postgres 5432, Firestore emulator 8080)
+- Performance: `bun run test:performance` (optional)
 
-- No over-engineering - keep it simple and pragmatic.
-- Design APIs that are predictable, composable, and hard to misuse.
-- Record decisions in lightweight ADRs as you go, not retroactively.
-- Make testability a first-class design constraint, not an afterthought.
-- Performance: O(1) acquire/isLocked, O(log n) release/extend acceptable
-- Prioritize correctness and safety over micro-optimizations.
-- Expose the smallest possible public API that solves the problem.
-- Prioritize optimal, simple and elegant API over backwards compatibility.
+Code standards:
 
-### Module Exports
-
-- Main: `syncguard` → Core types/utilities
-- Submodules: `syncguard/redis`, `syncguard/postgres`, `syncguard/firestore`, `syncguard/common`
-- All exports use ES modules with TypeScript declarations
-
-## Testing Approach
-
-**Hybrid testing strategy** - See `test/README.md` for details
-
-Assume that:
-
-- Redis server is already running on localhost:6379
-- PostgreSQL server is already running on localhost:5432
-- Firestore emulator is already running on localhost:8080
-
-### Development workflow
-
-1. **Unit tests**: `bun run test:unit` (fast, mocked dependencies)
-2. **Build/typecheck**: `bun run build && bun run typecheck`
-3. **Integration tests**: `bun run test:integration` (requires Redis, PostgreSQL, and Firestore emulator)
-4. **Performance validation**: `bun run test:performance` (optional)
-
-## Code Standards
-
-- **Functional style**: Pure functions, immutable data, `const` over `let`, avoid classes
-- **TypeScript**: Strict mode, ESNext target, noUncheckedIndexedAccess
-- **Formatting**: Prettier with default config
-- **Headers**: SPDX license identifiers required
-- **Exports**: Named exports preferred, tree-shakable modules
-- **Error handling**: Primary API throws `LockError`, manual ops return `LockResult`
-- **Error messages**: Include context (key, lockId) in all errors
-- **Peer dependencies**: Optional - users install only what they need
-- **JSDoc**: Required for all public APIs
+- Functional style; strict TypeScript (ESNext, `noUncheckedIndexedAccess`)
+- Prettier formatting; SPDX headers required
+- Named exports; tree-shakable
+- Errors: public API throws `LockError`; manual ops return `LockResult`; include key/lockId in messages
+- Peer deps optional; JSDoc on public APIs

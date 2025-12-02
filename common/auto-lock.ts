@@ -46,7 +46,6 @@ const defaultDisposalErrorHandler: OnReleaseError = (err, ctx) => {
 /**
  * Auto-managed lock with retry logic for acquisition contention.
  * Backends perform single-attempt operations (ADR-009), retries handled here.
- * @see specs/adrs.md
  */
 
 /**
@@ -94,7 +93,7 @@ function calculateRetryDelay(
  * @returns Result of fn execution
  * @throws {LockError} AcquisitionTimeout, NetworkTimeout, or Internal
  * @see common/types.ts for LockConfig
- * @see specs/interface.md for usage examples
+ * @see docs/specs/interface.md for usage examples
  */
 /**
  * Creates a curried lock function bound to a specific backend.

@@ -6,7 +6,7 @@
  * Flow: check expiration → generate fence token → set both keys with identical TTL
  *
  * @returns {1, fence, expiresAtMs} on success, 0 on contention
- * @see specs/redis-backend.md
+ * @see docs/specs/redis-backend.md
  *
  * KEYS: [lockKey, lockIdKey, fenceKey]
  * ARGV: [lockId, ttlMs, toleranceMs, storageKey, userKey]
@@ -51,7 +51,8 @@ return {1, fence, expiresAtMs}
  * Flow: reverse lookup → verify ownership → atomic delete
  *
  * @returns 1=success, 0=ownership mismatch, -1=not found, -2=expired
- * @see specs/adrs.md (ADR-003: ownership verification, ADR-013: index retrieval)
+ * @see docs/adr/003-explicit-ownership-verification.md - Ownership verification
+ * @see docs/adr/013-full-storage-key-in-index.md - Index retrieval
  *
  * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs]
@@ -92,7 +93,8 @@ return 1
  * Flow: reverse lookup → verify ownership → replace TTL entirely (not additive)
  *
  * @returns {1, newExpiresAtMs} on success, 0 on ownership mismatch/not found/expired
- * @see specs/adrs.md (ADR-003: ownership verification, ADR-013: index retrieval)
+ * @see docs/adr/003-explicit-ownership-verification.md - Ownership verification
+ * @see docs/adr/013-full-storage-key-in-index.md - Index retrieval
  *
  * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs, ttlMs]
@@ -137,7 +139,7 @@ return {1, newExpiresAtMs}
  * Cleanup uses 2s safety buffer to prevent extend() race conditions.
  *
  * @returns 1 if locked and live, 0 otherwise
- * @see specs/redis-backend.md
+ * @see docs/specs/redis-backend.md
  *
  * KEYS: [lockKey]
  * ARGV: [keyPrefix, toleranceMs, enableCleanup ("true"|"false")]
@@ -184,7 +186,7 @@ return 1
  * Lookup lock by key, returns info only if live.
  *
  * @returns lock info (JSON) if live, nil otherwise
- * @see specs/interface.md
+ * @see docs/specs/interface.md
  *
  * KEYS: [lockKey]
  * ARGV: [toleranceMs]
@@ -218,8 +220,7 @@ return cjson.encode(data)
  * ONLY—correctness relies on atomic release/extend operations, NOT lookup results.
  *
  * @returns lock info (JSON) if live and owned, nil otherwise
- * @see specs/interface.md
- * @see specs/adrs.md (ADR-011: atomicity, ADR-013: index retrieval)
+ * @see docs/specs/interface.md
  *
  * KEYS: [lockIdKey]
  * ARGV: [lockId, toleranceMs]

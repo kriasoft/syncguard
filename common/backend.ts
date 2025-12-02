@@ -5,7 +5,7 @@
  * Core module exports for LockBackend implementations.
  * Import from `syncguard/common` to build custom backends.
  *
- * @see specs/interface.md - LockBackend API contracts
+ * @see docs/specs/interface.md - LockBackend API contracts
  */
 
 // Export createAutoLock for internal use by backend modules only

@@ -72,9 +72,9 @@
  * **Important**: disposeTimeoutMs bounds the async disposal wait time, not the actual
  * backend cleanup. Use for responsiveness guarantees in high-reliability contexts.
  *
- * @see specs/interface.md#resource-management - Normative specification
- * @see specs/adrs.md#adr-015-async-raii-for-locks - ADR-015: Async RAII for Locks
- * @see specs/adrs.md#adr-016-opt-in-disposal-timeout - ADR-016: Opt-In Disposal Timeout
+ * @see docs/specs/interface.md#resource-management - Normative specification
+ * @see docs/adr/015-async-raii-locks.md - Async RAII for Locks
+ * @see docs/adr/016-disposal-timeout.md - Opt-In Disposal Timeout
  */
 
 import type {
@@ -128,8 +128,8 @@ export type { OnReleaseError } from "./types.js";
  * });
  * ```
  *
- * @see specs/interface.md#error-handling - Error handling best practices
- * @see specs/adrs.md#adr-015-async-raii-for-locks - Disposal error semantics
+ * @see docs/specs/interface.md#error-handling - Error handling best practices
+ * @see docs/adr/015-async-raii-locks.md - Disposal error semantics
  */
 const defaultDisposalErrorHandler: OnReleaseError = (err, ctx) => {
   // Only log in development or when explicitly enabled via env var

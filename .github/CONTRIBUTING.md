@@ -121,17 +121,18 @@ test/
 └── performance/    # Performance benchmarks
 
 docs/               # VitePress documentation site
-specs/              # Technical specifications and ADRs
+├── specs/          # Technical specifications
+└── adr/            # Architectural decision records
 ```
 
 ## Types of Contributions
 
 - **Bug fixes**: Always welcome (include test case demonstrating the bug)
-- **New backends**: Follow `specs/interface.md` and existing patterns (Redis/PostgreSQL/Firestore)
+- **New backends**: Follow `docs/specs/interface.md` and existing patterns (Redis/PostgreSQL/Firestore)
 - **Performance improvements**: Include benchmarks showing improvement
 - **Documentation**: Especially examples, edge cases, and troubleshooting
 - **Tests**: Better coverage is always good
-- **Spec reviews & improvements**: Review `specs/` directory and propose architectural improvements
+- **Spec reviews & improvements**: Review `docs/specs/` and `docs/adr/` directories and propose architectural improvements
   - Identify inconsistencies or ambiguities in specs
   - Suggest new ADRs for design decisions
   - Improve spec clarity and completeness
@@ -143,7 +144,7 @@ When contributing, follow these key principles from CLAUDE.md:
 
 - **No over-engineering** - Keep it simple and pragmatic
 - **Design APIs that are predictable, composable, and hard to misuse**
-- **Record decisions in ADRs** (specs/adrs.md) as you go, not retroactively
+- **Record decisions in ADRs** (`docs/adr/`) as you go, not retroactively
 - **Make testability a first-class design constraint**
 - **Prioritize correctness and safety over micro-optimizations**
 - **Expose the smallest possible public API that solves the problem**
@@ -152,14 +153,14 @@ When contributing, follow these key principles from CLAUDE.md:
 
 If contributing a new backend, ensure:
 
-- [ ] Implements full `LockBackend` interface (specs/interface.md)
+- [ ] Implements full `LockBackend` interface (`docs/specs/interface.md`)
 - [ ] Uses `isLive()` from `common/time-predicates.ts` (no custom time logic)
-- [ ] Uses `makeStorageKey()` for key generation with two-step fence pattern (specs/interface.md#fence-key-derivation, ADR-006)
+- [ ] Uses `makeStorageKey()` for key generation with two-step fence pattern (`docs/specs/interface.md#fence-key-derivation`, ADR-006)
 - [ ] Uses `formatFence()` for 15-digit zero-padded fence tokens (ADR-004)
 - [ ] Implements TOCTOU protection for release/extend (ADR-003)
 - [ ] Explicit ownership verification after reverse mapping
 - [ ] Comprehensive unit and integration tests
-- [ ] Backend-specific spec document (follow specs/redis-backend.md, specs/postgres-backend.md, or specs/firestore-backend.md pattern)
+- [ ] Backend-specific spec document (follow `docs/specs/redis-backend.md`, `docs/specs/postgres-backend.md`, or `docs/specs/firestore-backend.md` pattern)
 
 ## Getting Help
 
@@ -167,7 +168,7 @@ If contributing a new backend, ensure:
 - **Discord**: Join [Kriasoft Discord](https://discord.gg/EnbEa7Gsxg) #syncguard channel
 - **Bugs**: Check [existing issues](https://github.com/kriasoft/syncguard/issues) first
 - **Ideas**: Start with a discussion before coding to align on approach
-- **Documentation**: See [docs site](https://kriasoft.com/syncguard/) and specs/ directory
+- **Documentation**: See [docs site](https://kriasoft.com/syncguard/) and `docs/specs/` directory
 
 ## Code of Conduct
 

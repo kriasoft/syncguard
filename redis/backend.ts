@@ -69,7 +69,7 @@ interface RedisWithCommands extends Redis {
  * @param redis - ioredis client instance
  * @param options - Backend configuration (keyPrefix, ttl, tolerance)
  * @returns LockBackend with server-side time authority
- * @see specs/redis-backend.md
+ * @see docs/specs/redis-backend.md
  */
 export function createRedisBackend(
   redis: Redis,

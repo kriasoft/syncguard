@@ -89,7 +89,7 @@ export function mapFirestoreConditions(conditions: {
 /**
  * Unified backend observation mapper for Redis codes or Firestore conditions.
  * @param observation - Redis script code or Firestore query analysis
- * @see specs/interface.md
+ * @see docs/specs/interface.md
  */
 export function mapBackendObservation(
   observation:

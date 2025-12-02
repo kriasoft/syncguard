@@ -146,5 +146,5 @@ SyncGuard uses atomic operations (Lua scripts for Redis, transactions for Postgr
 - Ownership verified before release/extend (see ADR-003)
 - Monotonic fence tokens for stale lock protection
 
-**Deep dive**: See [specs/interface.md](https://github.com/kriasoft/syncguard/blob/main/specs/interface.md) for TOCTOU protection requirements and atomicity guarantees.
+**Deep dive**: See [docs/specs/interface.md](https://github.com/kriasoft/syncguard/blob/main/docs/specs/interface.md) for TOCTOU protection requirements and atomicity guarantees.
 :::

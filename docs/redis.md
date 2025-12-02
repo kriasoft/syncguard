@@ -3,7 +3,7 @@
 High-performance distributed locking using Redis as the backend. Ideal for sub-millisecond latency requirements and high-throughput scenarios.
 
 ::: tip Technical Specifications
-For backend implementers: See [specs/redis-backend.md](https://github.com/kriasoft/syncguard/blob/main/specs/redis-backend.md) for complete implementation requirements, Lua script patterns, and architecture decisions.
+For backend implementers: See [docs/specs/redis-backend.md](https://github.com/kriasoft/syncguard/blob/main/docs/specs/redis-backend.md) for complete implementation requirements, Lua script patterns, and architecture decisions.
 :::
 
 ## Installation
@@ -268,7 +268,7 @@ redis-cli --scan --pattern "syncguard:fence:*" | wc -l
 For applications generating >10M unique lock keys annually, consider key normalization.
 
 ::: info Fence Counter Lifecycle
-Fence counters are intentionally persistent. See [specs/redis-backend.md § Fence Key Lifecycle](https://github.com/kriasoft/syncguard/blob/main/specs/redis-backend.md#fence-key-lifecycle-and-memory-considerations) for the complete rationale and operational guidance.
+Fence counters are intentionally persistent. See [docs/specs/redis-backend.md § Fence Key Lifecycle](https://github.com/kriasoft/syncguard/blob/main/docs/specs/redis-backend.md#fence-key-lifecycle-and-memory-considerations) for the complete rationale and operational guidance.
 :::
 
 ::: tip Performance Tip

@@ -25,7 +25,7 @@ import type {
  * @param db - Firestore instance from @google-cloud/firestore
  * @param options - Backend configuration (collection, ttl, tolerance)
  * @returns LockBackend with client-side time authority
- * @see specs/firestore-backend.md
+ * @see docs/specs/firestore-backend.md
  */
 export function createFirestoreBackend(
   db: Firestore,

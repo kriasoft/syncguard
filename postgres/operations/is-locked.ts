@@ -34,7 +34,7 @@ import type { LockRow, PostgresConfig } from "../types.js";
  * @param config - PostgreSQL backend configuration
  * @returns IsLocked operation function
  *
- * @see specs/interface.md#islocked-operation-requirements - Normative requirements
+ * @see docs/specs/interface.md#islocked-operation-requirements - Normative requirements
  */
 export function createIsLockedOperation(sql: Sql, config: PostgresConfig) {
   return async (opts: KeyOp): Promise<boolean> => {
