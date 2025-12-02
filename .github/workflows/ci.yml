@@ -35,6 +35,7 @@ jobs:
       - run: bun run test:unit:coverage
 
       - name: Upload coverage to Codecov
+        if: matrix.bun-version == 'latest'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
