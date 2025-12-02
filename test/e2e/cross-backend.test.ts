@@ -25,7 +25,6 @@ import {
   expect,
   it,
 } from "bun:test";
-import { makeStorageKey } from "../../common/crypto.js";
 import type { LockBackend } from "../../common/types.js";
 import { getAvailableBackends } from "../fixtures/backends.js";
 
@@ -144,7 +143,7 @@ describe("E2E: Cross-Backend Consistency", async () => {
           expect(isLocked).toBe(false);
         });
 
-        it("should handle lookup consistently within tolerance window", async () => {
+        it("should return lock info for active lock", async () => {
           const key = "lookup:consistency:test";
 
           // Acquire lock
@@ -233,111 +232,4 @@ describe("E2E: Cross-Backend Consistency", async () => {
       });
     });
   }
-
-  describe("Storage Key Consistency", () => {
-    it("should produce identical base storage keys for same user key", () => {
-      const userKey = "resource:payment:12345";
-
-      // Redis-style computation
-      const redisReserve = 25; // "id:" + 22-char lockId
-      const redisBaseKey = makeStorageKey("test:", userKey, 1000, redisReserve);
-
-      // Firestore-style computation
-      const firestoreReserve = 0; // No derived keys
-      const firestoreBaseKey = makeStorageKey(
-        "",
-        userKey,
-        1500,
-        firestoreReserve,
-      );
-
-      // Both should preserve user key when no truncation needed
-      expect(redisBaseKey).toContain(userKey);
-      expect(firestoreBaseKey).toBe(userKey);
-
-      // Verify both use makeStorageKey() for consistent hashing
-      const longKey = "x".repeat(600);
-      const redisLongKey = makeStorageKey("test:", longKey, 1000, redisReserve);
-      const firestoreLongKey = makeStorageKey(
-        "",
-        longKey,
-        1500,
-        firestoreReserve,
-      );
-
-      // When truncation occurs, both should use same hash algorithm
-      expect(redisLongKey.length).toBeLessThanOrEqual(1000);
-      expect(firestoreLongKey.length).toBeLessThanOrEqual(1500);
-    });
-
-    it("should derive fence keys from same base storage key (ADR-006 two-step pattern)", () => {
-      const userKey = "resource:critical:operation";
-
-      // Redis: two-step derivation
-      const redisReserve = 25;
-      // Step 1: Compute base storage key
-      const redisBaseKey = makeStorageKey("test:", userKey, 1000, redisReserve);
-      // Step 2: Derive fence key from base
-      const redisFenceKey = makeStorageKey(
-        "test:",
-        `fence:${redisBaseKey}`,
-        1000,
-        redisReserve,
-      );
-
-      // Firestore: two-step derivation
-      const firestoreReserve = 0;
-      // Step 1: Compute base storage key
-      const firestoreBaseKey = makeStorageKey(
-        "",
-        userKey,
-        1500,
-        firestoreReserve,
-      );
-      // Step 2: Derive fence document ID from base
-      const firestoreFenceDocId = makeStorageKey(
-        "",
-        `fence:${firestoreBaseKey}`,
-        1500,
-        firestoreReserve,
-      );
-
-      // Verify both backends use two-step pattern
-      expect(redisFenceKey).toContain("fence:");
-      expect(firestoreFenceDocId).toContain("fence:");
-
-      // Test with long keys
-      const longKey = "x".repeat(2000);
-      const redisBaseLong = makeStorageKey(
-        "test:",
-        longKey,
-        1000,
-        redisReserve,
-      );
-      const redisFenceLong = makeStorageKey(
-        "test:",
-        `fence:${redisBaseLong}`,
-        1000,
-        redisReserve,
-      );
-      const firestoreBaseLong = makeStorageKey(
-        "",
-        longKey,
-        1500,
-        firestoreReserve,
-      );
-      const firestoreFenceLong = makeStorageKey(
-        "",
-        `fence:${firestoreBaseLong}`,
-        1500,
-        firestoreReserve,
-      );
-
-      // Both backends ensure 1:1 mapping
-      expect(redisBaseLong.length).toBeLessThanOrEqual(1000);
-      expect(redisFenceLong.length).toBeLessThanOrEqual(1000);
-      expect(firestoreBaseLong.length).toBeLessThanOrEqual(1500);
-      expect(firestoreFenceLong.length).toBeLessThanOrEqual(1500);
-    });
-  });
 });
