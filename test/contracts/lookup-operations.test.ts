@@ -32,6 +32,9 @@ describe("Lookup Operations", async () => {
       const shortTtl = fixture.kind === "firestore" ? 2000 : 1000;
       // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms) + network buffer
       const sleepBuffer = fixture.kind === "firestore" ? 4000 : 2500;
+      // Firestore tests need longer timeout and retry for network variability
+      const slowTestOpts =
+        fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
 
       beforeAll(async () => {
         const result = await fixture.setup();
@@ -149,31 +152,35 @@ describe("Lookup Operations", async () => {
         expect(lookupResult).toBeNull();
       });
 
-      it("should return null for expired lock", async () => {
-        const key = "lookup:expired:test";
+      it(
+        "should return null for expired lock",
+        async () => {
+          const key = "lookup:expired:test";
 
-        // Acquire lock with short TTL
-        const acquireResult = await backend.acquire({
-          key,
-          ttlMs: shortTtl,
-        });
-        expect(acquireResult.ok).toBe(true);
-
-        if (acquireResult.ok) {
-          // Wait for lock to expire (with generous buffer)
-          await Bun.sleep(sleepBuffer);
-
-          // Lookup should return null for expired lock
-          const lookupResult = await backend.lookup({ key });
-          expect(lookupResult).toBeNull();
-
-          // Ownership lookup should also return null
-          const ownershipResult = await backend.lookup({
-            lockId: acquireResult.lockId,
+          // Acquire lock with short TTL
+          const acquireResult = await backend.acquire({
+            key,
+            ttlMs: shortTtl,
           });
-          expect(ownershipResult).toBeNull();
-        }
-      });
+          expect(acquireResult.ok).toBe(true);
+
+          if (acquireResult.ok) {
+            // Wait for lock to expire (with generous buffer)
+            await Bun.sleep(sleepBuffer);
+
+            // Lookup should return null for expired lock
+            const lookupResult = await backend.lookup({ key });
+            expect(lookupResult).toBeNull();
+
+            // Ownership lookup should also return null
+            const ownershipResult = await backend.lookup({
+              lockId: acquireResult.lockId,
+            });
+            expect(ownershipResult).toBeNull();
+          }
+        },
+        slowTestOpts,
+      );
 
       it("should validate key before performing lookup", async () => {
         // Invalid keys should throw immediately without I/O

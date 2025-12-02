@@ -45,6 +45,15 @@ describe("Smoke Tests", async () => {
       let cleanup: () => Promise<void>;
       let teardown: () => Promise<void>;
 
+      // TIME_TOLERANCE_MS is 1000ms, so lock expiry = TTL + 1000ms
+      // Firestore is slower due to HTTP round-trips - use longer base timeouts
+      const shortTtl = fixture.kind === "firestore" ? 2000 : 1000;
+      // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms) + network buffer
+      const sleepBuffer = fixture.kind === "firestore" ? 4000 : 2500;
+      // Firestore tests need longer timeout and retry for network variability
+      const slowTestOpts =
+        fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
+
       beforeAll(async () => {
         const setup = await fixture.setup();
         backend = setup.createBackend() as LockBackend;
@@ -137,18 +146,23 @@ describe("Smoke Tests", async () => {
       });
 
       // TTL expiration
-      it("expires lock after TTL", async () => {
-        const key = "smoke:ttl";
+      it(
+        "expires lock after TTL",
+        async () => {
+          const key = "smoke:ttl";
 
-        const result = await backend.acquire({ key, ttlMs: 100 });
-        expect(result.ok).toBe(true);
+          const result = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result.ok).toBe(true);
 
-        if (result.ok) {
-          expect(await backend.isLocked({ key })).toBe(true);
-          await Bun.sleep(150);
-          expect(await backend.isLocked({ key })).toBe(false);
-        }
-      });
+          if (result.ok) {
+            expect(await backend.isLocked({ key })).toBe(true);
+            // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms)
+            await Bun.sleep(sleepBuffer);
+            expect(await backend.isLocked({ key })).toBe(false);
+          }
+        },
+        slowTestOpts,
+      );
 
       // Fence token
       it("generates monotonically increasing fence tokens", async () => {

@@ -47,6 +47,9 @@ describe("E2E: Lock Callback Pattern", async () => {
       let cleanup: () => Promise<void>;
       let teardown: () => Promise<void>;
 
+      // Firestore is significantly slower due to HTTP round-trips
+      const maxParallelTime = fixture.kind === "firestore" ? 5000 : 200;
+
       beforeAll(async () => {
         const setup = await fixture.setup();
         backend = setup.createBackend() as LockBackend;
@@ -314,8 +317,9 @@ describe("E2E: Lock Callback Pattern", async () => {
 
         const elapsed = Date.now() - startTime;
 
-        // Should complete in ~100ms (parallel), not 300ms (sequential)
-        expect(elapsed).toBeLessThan(200);
+        // Should complete in parallel, not sequential
+        // Firestore: ~1-3s due to HTTP round-trips, Redis/Postgres: ~100ms
+        expect(elapsed).toBeLessThan(maxParallelTime);
       });
 
       it("should execute callback with void return", async () => {

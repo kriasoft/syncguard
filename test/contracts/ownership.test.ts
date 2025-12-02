@@ -31,6 +31,9 @@ describe("Ownership Verification (ADR-003)", async () => {
       const shortTtl = fixture.kind === "firestore" ? 2000 : 1000;
       // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms) + network buffer
       const sleepBuffer = fixture.kind === "firestore" ? 4000 : 2500;
+      // Firestore tests need longer timeout and retry for network variability
+      const slowTestOpts =
+        fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
 
       beforeAll(async () => {
         const result = await fixture.setup();
@@ -127,41 +130,45 @@ describe("Ownership Verification (ADR-003)", async () => {
         }
       });
 
-      it("should prevent extending expired lock by another holder", async () => {
-        const key = "ownership:extend-after-expire:test";
+      it(
+        "should prevent extending expired lock by another holder",
+        async () => {
+          const key = "ownership:extend-after-expire:test";
 
-        // First lock with short TTL
-        const result1 = await backend.acquire({ key, ttlMs: shortTtl });
-        expect(result1.ok).toBe(true);
+          // First lock with short TTL
+          const result1 = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result1.ok).toBe(true);
 
-        if (result1.ok) {
-          const lockId1 = result1.lockId;
+          if (result1.ok) {
+            const lockId1 = result1.lockId;
 
-          // Wait for it to expire (with generous buffer)
-          await Bun.sleep(sleepBuffer);
+            // Wait for it to expire (with generous buffer)
+            await Bun.sleep(sleepBuffer);
 
-          // Second acquisition should succeed
-          const result2 = await backend.acquire({ key, ttlMs: 30000 });
-          expect(result2.ok).toBe(true);
+            // Second acquisition should succeed
+            const result2 = await backend.acquire({ key, ttlMs: 30000 });
+            expect(result2.ok).toBe(true);
 
-          if (result2.ok) {
-            // Try to extend expired lock with original lockId
-            const extendResult = await backend.extend({
-              lockId: lockId1,
-              ttlMs: 30000,
-            });
+            if (result2.ok) {
+              // Try to extend expired lock with original lockId
+              const extendResult = await backend.extend({
+                lockId: lockId1,
+                ttlMs: 30000,
+              });
 
-            // Should fail - lock has expired and new owner acquired it
-            expect(extendResult.ok).toBe(false);
+              // Should fail - lock has expired and new owner acquired it
+              expect(extendResult.ok).toBe(false);
 
-            // Current lock should still be held by new owner
-            expect(await backend.isLocked({ key })).toBe(true);
+              // Current lock should still be held by new owner
+              expect(await backend.isLocked({ key })).toBe(true);
 
-            // Clean up
-            await backend.release({ lockId: result2.lockId });
+              // Clean up
+              await backend.release({ lockId: result2.lockId });
+            }
           }
-        }
-      });
+        },
+        slowTestOpts,
+      );
 
       it("should verify ownership with correct lockId allows operations", async () => {
         const key = "ownership:correct:test";

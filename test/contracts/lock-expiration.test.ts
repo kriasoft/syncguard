@@ -31,6 +31,9 @@ describe("Lock Expiration", async () => {
       const shortTtl = fixture.kind === "firestore" ? 2000 : 1000;
       // Sleep must exceed TTL + TIME_TOLERANCE_MS (1000ms) + network buffer
       const sleepBuffer = fixture.kind === "firestore" ? 4000 : 2500;
+      // Firestore tests need longer timeout and retry for network variability
+      const slowTestOpts =
+        fixture.kind === "firestore" ? { timeout: 10000, retry: 2 } : {};
 
       beforeAll(async () => {
         const result = await fixture.setup();
@@ -47,32 +50,36 @@ describe("Lock Expiration", async () => {
         await teardown();
       });
 
-      it("should auto-expire locks after TTL", async () => {
-        const key = "expiration:auto-expire:test";
+      it(
+        "should auto-expire locks after TTL",
+        async () => {
+          const key = "expiration:auto-expire:test";
 
-        // Acquire lock with short TTL
-        const result = await backend.acquire({ key, ttlMs: shortTtl });
-        expect(result.ok).toBe(true);
+          // Acquire lock with short TTL
+          const result = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result.ok).toBe(true);
 
-        if (result.ok) {
-          // Verify lock is held
-          expect(await backend.isLocked({ key })).toBe(true);
+          if (result.ok) {
+            // Verify lock is held
+            expect(await backend.isLocked({ key })).toBe(true);
 
-          // Wait for TTL to expire (with generous buffer for slow backends)
-          await Bun.sleep(sleepBuffer);
+            // Wait for TTL to expire (with generous buffer for slow backends)
+            await Bun.sleep(sleepBuffer);
 
-          // Lock should be expired
-          expect(await backend.isLocked({ key })).toBe(false);
+            // Lock should be expired
+            expect(await backend.isLocked({ key })).toBe(false);
 
-          // Another process should be able to acquire it
-          const result2 = await backend.acquire({ key, ttlMs: 30000 });
-          expect(result2.ok).toBe(true);
+            // Another process should be able to acquire it
+            const result2 = await backend.acquire({ key, ttlMs: 30000 });
+            expect(result2.ok).toBe(true);
 
-          if (result2.ok) {
-            await backend.release({ lockId: result2.lockId });
+            if (result2.ok) {
+              await backend.release({ lockId: result2.lockId });
+            }
           }
-        }
-      });
+        },
+        slowTestOpts,
+      );
 
       it("should extend lock TTL", async () => {
         const key = "expiration:extend:test";
@@ -109,50 +116,58 @@ describe("Lock Expiration", async () => {
         }
       });
 
-      it("should not extend expired lock", async () => {
-        const key = "expiration:extend-expired:test";
+      it(
+        "should not extend expired lock",
+        async () => {
+          const key = "expiration:extend-expired:test";
 
-        // Acquire lock with short TTL
-        const result = await backend.acquire({ key, ttlMs: shortTtl });
-        expect(result.ok).toBe(true);
+          // Acquire lock with short TTL
+          const result = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result.ok).toBe(true);
 
-        if (result.ok) {
-          // Wait for lock to expire (with generous buffer)
-          await Bun.sleep(sleepBuffer);
+          if (result.ok) {
+            // Wait for lock to expire (with generous buffer)
+            await Bun.sleep(sleepBuffer);
 
-          // Try to extend expired lock
-          const extended = await backend.extend({
-            lockId: result.lockId,
-            ttlMs: 1000,
-          });
-          expect(extended.ok).toBe(false);
-        }
-      });
-
-      it("should clean up expired locks during isLocked check", async () => {
-        const key = "expiration:cleanup:test";
-
-        // Create a lock with short TTL
-        const result = await backend.acquire({ key, ttlMs: shortTtl });
-        expect(result.ok).toBe(true);
-
-        if (result.ok) {
-          // Wait for it to expire (with generous buffer)
-          await Bun.sleep(sleepBuffer);
-
-          // isLocked should trigger cleanup and return false
-          const isLocked = await backend.isLocked({ key });
-          expect(isLocked).toBe(false);
-
-          // Verify the lock was actually cleaned up (can acquire immediately)
-          const result2 = await backend.acquire({ key, ttlMs: 30000 });
-          expect(result2.ok).toBe(true);
-
-          if (result2.ok) {
-            await backend.release({ lockId: result2.lockId });
+            // Try to extend expired lock
+            const extended = await backend.extend({
+              lockId: result.lockId,
+              ttlMs: 1000,
+            });
+            expect(extended.ok).toBe(false);
           }
-        }
-      });
+        },
+        slowTestOpts,
+      );
+
+      it(
+        "should clean up expired locks during isLocked check",
+        async () => {
+          const key = "expiration:cleanup:test";
+
+          // Create a lock with short TTL
+          const result = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result.ok).toBe(true);
+
+          if (result.ok) {
+            // Wait for it to expire (with generous buffer)
+            await Bun.sleep(sleepBuffer);
+
+            // isLocked should trigger cleanup and return false
+            const isLocked = await backend.isLocked({ key });
+            expect(isLocked).toBe(false);
+
+            // Verify the lock was actually cleaned up (can acquire immediately)
+            const result2 = await backend.acquire({ key, ttlMs: 30000 });
+            expect(result2.ok).toBe(true);
+
+            if (result2.ok) {
+              await backend.release({ lockId: result2.lockId });
+            }
+          }
+        },
+        slowTestOpts,
+      );
 
       it("should handle multiple extends", async () => {
         const key = "expiration:multiple-extends:test";
@@ -184,28 +199,32 @@ describe("Lock Expiration", async () => {
         }
       });
 
-      it("should respect TTL boundaries", async () => {
-        const key = "expiration:boundaries:test";
+      it(
+        "should respect TTL boundaries",
+        async () => {
+          const key = "expiration:boundaries:test";
 
-        // Test with short TTL
-        const result1 = await backend.acquire({ key, ttlMs: shortTtl });
-        expect(result1.ok).toBe(true);
+          // Test with short TTL
+          const result1 = await backend.acquire({ key, ttlMs: shortTtl });
+          expect(result1.ok).toBe(true);
 
-        if (result1.ok) {
-          await Bun.sleep(sleepBuffer);
-          expect(await backend.isLocked({ key })).toBe(false);
-        }
+          if (result1.ok) {
+            await Bun.sleep(sleepBuffer);
+            expect(await backend.isLocked({ key })).toBe(false);
+          }
 
-        // Test with larger TTL (30 seconds)
-        const result2 = await backend.acquire({ key, ttlMs: 30000 });
-        expect(result2.ok).toBe(true);
+          // Test with larger TTL (30 seconds)
+          const result2 = await backend.acquire({ key, ttlMs: 30000 });
+          expect(result2.ok).toBe(true);
 
-        if (result2.ok) {
-          await Bun.sleep(100);
-          expect(await backend.isLocked({ key })).toBe(true);
-          await backend.release({ lockId: result2.lockId });
-        }
-      });
+          if (result2.ok) {
+            await Bun.sleep(100);
+            expect(await backend.isLocked({ key })).toBe(true);
+            await backend.release({ lockId: result2.lockId });
+          }
+        },
+        slowTestOpts,
+      );
     });
   }
 });

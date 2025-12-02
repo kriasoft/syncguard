@@ -40,6 +40,12 @@ describe("E2E: Concurrent Workers", async () => {
       let cleanup: () => Promise<void>;
       let teardown: () => Promise<void>;
 
+      // Firestore tests need longer timeout and retry for network variability
+      const slowTestOpts =
+        fixture.kind === "firestore"
+          ? { timeout: 15000, retry: 2 }
+          : { timeout: 10000 };
+
       beforeAll(async () => {
         const setup = await fixture.setup();
         backend = setup.createBackend() as LockBackend;
@@ -55,130 +61,145 @@ describe("E2E: Concurrent Workers", async () => {
         await teardown();
       });
 
-      it("should handle multiple concurrent lock attempts on same key", async () => {
-        const resourceKey = "concurrent:shared-resource";
-        const numWorkers = 5;
-        let successfulAcquisitions = 0;
-        let failedAcquisitions = 0;
+      it(
+        "should handle multiple concurrent lock attempts on same key",
+        async () => {
+          const resourceKey = "concurrent:shared-resource";
+          const numWorkers = 5;
+          let successfulAcquisitions = 0;
+          let failedAcquisitions = 0;
 
-        // Multiple workers trying to acquire the same lock
-        const workers = Array.from({ length: numWorkers }, async () => {
-          const result = await backend.acquire({
-            key: resourceKey,
-            ttlMs: 100,
-          });
-
-          if (result.ok) {
-            successfulAcquisitions++;
-            // Simulate work
-            await Bun.sleep(20);
-            await backend.release({ lockId: result.lockId });
-          } else {
-            failedAcquisitions++;
-          }
-        });
-
-        await Promise.all(workers);
-
-        // Only one worker should succeed at a time with short TTL
-        expect(successfulAcquisitions).toBeGreaterThan(0);
-        expect(successfulAcquisitions + failedAcquisitions).toBe(numWorkers);
-      });
-
-      it("should ensure sequential execution under lock contention", async () => {
-        const resourceKey = "concurrent:counter";
-        let sharedCounter = 0;
-        const incrementResults: number[] = [];
-        const numOperations = 3;
-
-        // Create concurrent operations that modify shared state
-        const operations = Array.from(
-          { length: numOperations },
-          async (_, index) => {
-            // Retry logic for lock acquisition
-            let acquired = false;
-            let attempts = 0;
-            const maxAttempts = 50;
-
-            while (!acquired && attempts < maxAttempts) {
-              const result = await backend.acquire({
-                key: resourceKey,
-                ttlMs: 5000,
-              });
-
-              if (result.ok) {
-                acquired = true;
-                try {
-                  // Critical section
-                  const current = sharedCounter;
-                  await Bun.sleep(30); // Simulate work
-                  sharedCounter = current + 1;
-                  incrementResults.push(sharedCounter);
-                } finally {
-                  await backend.release({ lockId: result.lockId });
-                }
-              } else {
-                attempts++;
-                await Bun.sleep(10);
-              }
-            }
-          },
-        );
-
-        await Promise.all(operations);
-
-        // All operations should complete successfully
-        expect(incrementResults.length).toBe(numOperations);
-
-        // Counter should reflect all increments (no lost updates)
-        expect(sharedCounter).toBe(numOperations);
-
-        // Results should be sequential [1, 2, 3]
-        expect(incrementResults.sort()).toEqual([1, 2, 3]);
-      }, 10000); // Longer timeout for retries
-
-      it("should prevent data corruption under concurrent load", async () => {
-        const resourceKey = "concurrent:data-integrity";
-        const numWorkers = 10;
-        const data: number[] = [];
-
-        // Multiple workers appending to shared array
-        const workers = Array.from({ length: numWorkers }, async (_, index) => {
-          let acquired = false;
-          let attempts = 0;
-
-          while (!acquired && attempts < 30) {
+          // Multiple workers trying to acquire the same lock
+          const workers = Array.from({ length: numWorkers }, async () => {
             const result = await backend.acquire({
               key: resourceKey,
-              ttlMs: 2000,
+              ttlMs: 100,
             });
 
             if (result.ok) {
-              acquired = true;
-              try {
-                // Read-modify-write pattern
-                const current = [...data];
-                await Bun.sleep(5);
-                data.push(index);
-              } finally {
-                await backend.release({ lockId: result.lockId });
-              }
+              successfulAcquisitions++;
+              // Simulate work
+              await Bun.sleep(20);
+              await backend.release({ lockId: result.lockId });
             } else {
-              attempts++;
-              await Bun.sleep(10);
+              failedAcquisitions++;
             }
-          }
-        });
+          });
 
-        await Promise.all(workers);
+          await Promise.all(workers);
 
-        // All workers should have successfully written their data
-        expect(data.length).toBe(numWorkers);
+          // Only one worker should succeed at a time with short TTL
+          expect(successfulAcquisitions).toBeGreaterThan(0);
+          expect(successfulAcquisitions + failedAcquisitions).toBe(numWorkers);
+        },
+        slowTestOpts,
+      );
 
-        // All indices should be present (no duplicates or missing values)
-        const uniqueValues = new Set(data);
-        expect(uniqueValues.size).toBe(numWorkers);
-      }, 10000); // Longer timeout for retries
+      it(
+        "should ensure sequential execution under lock contention",
+        async () => {
+          const resourceKey = "concurrent:counter";
+          let sharedCounter = 0;
+          const incrementResults: number[] = [];
+          const numOperations = 3;
+
+          // Create concurrent operations that modify shared state
+          const operations = Array.from(
+            { length: numOperations },
+            async (_, index) => {
+              // Retry logic for lock acquisition
+              let acquired = false;
+              let attempts = 0;
+              const maxAttempts = 50;
+
+              while (!acquired && attempts < maxAttempts) {
+                const result = await backend.acquire({
+                  key: resourceKey,
+                  ttlMs: 5000,
+                });
+
+                if (result.ok) {
+                  acquired = true;
+                  try {
+                    // Critical section
+                    const current = sharedCounter;
+                    await Bun.sleep(30); // Simulate work
+                    sharedCounter = current + 1;
+                    incrementResults.push(sharedCounter);
+                  } finally {
+                    await backend.release({ lockId: result.lockId });
+                  }
+                } else {
+                  attempts++;
+                  await Bun.sleep(10);
+                }
+              }
+            },
+          );
+
+          await Promise.all(operations);
+
+          // All operations should complete successfully
+          expect(incrementResults.length).toBe(numOperations);
+
+          // Counter should reflect all increments (no lost updates)
+          expect(sharedCounter).toBe(numOperations);
+
+          // Results should be sequential [1, 2, 3]
+          expect(incrementResults.sort()).toEqual([1, 2, 3]);
+        },
+        slowTestOpts,
+      );
+
+      it(
+        "should prevent data corruption under concurrent load",
+        async () => {
+          const resourceKey = "concurrent:data-integrity";
+          const numWorkers = 10;
+          const data: number[] = [];
+
+          // Multiple workers appending to shared array
+          const workers = Array.from(
+            { length: numWorkers },
+            async (_, index) => {
+              let acquired = false;
+              let attempts = 0;
+
+              while (!acquired && attempts < 30) {
+                const result = await backend.acquire({
+                  key: resourceKey,
+                  ttlMs: 2000,
+                });
+
+                if (result.ok) {
+                  acquired = true;
+                  try {
+                    // Read-modify-write pattern
+                    const current = [...data];
+                    await Bun.sleep(5);
+                    data.push(index);
+                  } finally {
+                    await backend.release({ lockId: result.lockId });
+                  }
+                } else {
+                  attempts++;
+                  await Bun.sleep(10);
+                }
+              }
+            },
+          );
+
+          await Promise.all(workers);
+
+          // All workers should have successfully written their data
+          expect(data.length).toBe(numWorkers);
+
+          // All indices should be present (no duplicates or missing values)
+          const uniqueValues = new Set(data);
+          expect(uniqueValues.size).toBe(numWorkers);
+        },
+        slowTestOpts,
+      );
 
       it("should handle rapid acquire/release cycles", async () => {
         const resourceKey = "concurrent:rapid-cycles";
@@ -251,53 +272,57 @@ describe("E2E: Concurrent Workers", async () => {
         expect(elapsed).toBeLessThan(maxExpected);
       });
 
-      it("should demonstrate lock contention behavior under stress", async () => {
-        const numOperations = 5;
-        const resourceKey = "concurrent:stress-test";
-        let successfulOperations = 0;
-        const errors: Error[] = [];
+      it(
+        "should demonstrate lock contention behavior under stress",
+        async () => {
+          const numOperations = 5;
+          const resourceKey = "concurrent:stress-test";
+          let successfulOperations = 0;
+          const errors: Error[] = [];
 
-        // Create concurrent lock operations with retries
-        const promises = Array.from(
-          { length: numOperations },
-          async (_, index) => {
-            let acquired = false;
-            let attempts = 0;
-            const maxAttempts = 30;
+          // Create concurrent lock operations with retries
+          const promises = Array.from(
+            { length: numOperations },
+            async (_, index) => {
+              let acquired = false;
+              let attempts = 0;
+              const maxAttempts = 30;
 
-            while (!acquired && attempts < maxAttempts) {
-              try {
-                const result = await backend.acquire({
-                  key: resourceKey,
-                  ttlMs: 2000,
-                });
+              while (!acquired && attempts < maxAttempts) {
+                try {
+                  const result = await backend.acquire({
+                    key: resourceKey,
+                    ttlMs: 2000,
+                  });
 
-                if (result.ok) {
-                  acquired = true;
-                  successfulOperations++;
-                  await Bun.sleep(10); // Brief critical section
-                  await backend.release({ lockId: result.lockId });
-                } else {
-                  attempts++;
-                  await Bun.sleep(15);
+                  if (result.ok) {
+                    acquired = true;
+                    successfulOperations++;
+                    await Bun.sleep(10); // Brief critical section
+                    await backend.release({ lockId: result.lockId });
+                  } else {
+                    attempts++;
+                    await Bun.sleep(15);
+                  }
+                } catch (error) {
+                  errors.push(error as Error);
+                  break;
                 }
-              } catch (error) {
-                errors.push(error as Error);
-                break;
               }
-            }
-          },
-        );
+            },
+          );
 
-        await Promise.all(promises);
+          await Promise.all(promises);
 
-        // Most or all operations should succeed with retries
-        expect(successfulOperations).toBeGreaterThan(0);
-        expect(successfulOperations).toBeLessThanOrEqual(numOperations);
+          // Most or all operations should succeed with retries
+          expect(successfulOperations).toBeGreaterThan(0);
+          expect(successfulOperations).toBeLessThanOrEqual(numOperations);
 
-        // Verify no dangling locks remain
-        expect(await backend.isLocked({ key: resourceKey })).toBe(false);
-      }, 10000); // Longer timeout for stress test
+          // Verify no dangling locks remain
+          expect(await backend.isLocked({ key: resourceKey })).toBe(false);
+        },
+        slowTestOpts,
+      );
     });
   }
 });
