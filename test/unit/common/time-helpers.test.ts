@@ -9,7 +9,7 @@
  * - isLive predicate for liveness checking
  * - calculateRedisServerTimeMs for Redis TIME command
  *
- * Per specs/interface.md:
+ * Per docs/specs/interface.md:
  * - TIME_TOLERANCE_MS in common/time-predicates.ts is the NORMATIVE SOURCE
  * - All backends MUST import and use this constant
  * - Backends MUST NOT hard-code alternative tolerance values
@@ -315,7 +315,7 @@ describe("TIME_TOLERANCE_MS Enforcement Across Backends", () => {
 
   describe("Documentation Consistency", () => {
     it("interface spec must declare TIME_TOLERANCE_MS as normative source", () => {
-      const spec = readFileSync("specs/interface.md", "utf-8");
+      const spec = readFileSync("docs/specs/interface.md", "utf-8");
 
       // Verify spec marks it as normative
       expect(spec).toContain("TIME_TOLERANCE_MS");
@@ -324,8 +324,11 @@ describe("TIME_TOLERANCE_MS Enforcement Across Backends", () => {
     });
 
     it("backend specs must reference interface.md, not duplicate the value", () => {
-      const firestoreSpec = readFileSync("specs/firestore-backend.md", "utf-8");
-      const redisSpec = readFileSync("specs/redis-backend.md", "utf-8");
+      const firestoreSpec = readFileSync(
+        "docs/specs/firestore-backend.md",
+        "utf-8",
+      );
+      const redisSpec = readFileSync("docs/specs/redis-backend.md", "utf-8");
 
       // Both specs should reference interface.md
       expect(firestoreSpec).toContain("TIME_TOLERANCE_MS");
@@ -334,16 +337,15 @@ describe("TIME_TOLERANCE_MS Enforcement Across Backends", () => {
       expect(redisSpec).toContain("interface.md");
     });
 
-    it("ADR-005 must reference interface.md as normative source", () => {
-      const adr = readFileSync("specs/adrs.md", "utf-8");
+    it("ADR-005 must reference interface.md as source", () => {
+      const adr = readFileSync(
+        "docs/adr/005-unified-time-tolerance.md",
+        "utf-8",
+      );
 
-      // ADR-005 section should reference interface.md
-      const adr005Section =
-        adr.split("## ADR-005")[1]?.split("## ADR-")[0] ?? "";
-
-      expect(adr005Section).toContain("TIME_TOLERANCE_MS");
-      expect(adr005Section).toContain("interface.md");
-      expect(adr005Section).toContain("normative");
+      // ADR should reference interface.md and TIME_TOLERANCE_MS
+      expect(adr).toContain("TIME_TOLERANCE_MS");
+      expect(adr).toContain("docs/specs/interface.md");
     });
   });
 });

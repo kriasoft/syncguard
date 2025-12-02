@@ -11,8 +11,8 @@ import { LockError } from "./errors.js";
  *
  * @param lockId - Lock identifier to validate
  * @throws {LockError} InvalidArgument for format violations (empty, wrong length, invalid characters)
- * @see specs/interface.md#acquire-operation-requirements - Normative lockId validation requirement
- * @see specs/interface.md#security-considerations - Lock ID security and CSPRNG requirements
+ * @see docs/specs/interface.md#acquire-operation-requirements - Normative lockId validation requirement
+ * @see docs/specs/interface.md#security-considerations - Lock ID security and CSPRNG requirements
  */
 export function validateLockId(lockId: string): void {
   if (
@@ -34,7 +34,7 @@ export function validateLockId(lockId: string): void {
  * @param key - User-provided lock key
  * @returns Normalized key safe for backend storage
  * @throws {LockError} InvalidArgument for empty/oversized keys (max 512 bytes after NFC normalization)
- * @see specs/interface.md#core-constants - Normative MAX_KEY_LENGTH_BYTES requirement
+ * @see docs/specs/interface.md#core-constants - Normative MAX_KEY_LENGTH_BYTES requirement
  * @see common/constants.ts - MAX_KEY_LENGTH_BYTES constant definition
  */
 export function normalizeAndValidateKey(key: string): string {

@@ -21,8 +21,8 @@ import type {
  * @param backend - Base backend to instrument
  * @param options - Telemetry configuration with event callback
  * @returns Instrumented backend with same capabilities
- * @see specs/interface.md Usage patterns and examples
- * @see specs/adrs.md ADR-007 for opt-in design rationale
+ * @see docs/specs/interface.md Usage patterns and examples
+ * @see docs/adr/007-opt-in-telemetry.md for opt-in design rationale
  */
 export function withTelemetry<C extends BackendCapabilities>(
   backend: LockBackend<C>,

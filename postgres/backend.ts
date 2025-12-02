@@ -29,7 +29,7 @@ import type { PostgresBackendOptions, PostgresCapabilities } from "./types.js";
  * @param sql - postgres.js SQL instance
  * @param options - Backend configuration (tables, cleanup options)
  * @returns LockBackend with server-side time authority
- * @see specs/postgres-backend.md
+ * @see docs/specs/postgres-backend.md
  *
  * @example
  * ```typescript

@@ -9,7 +9,7 @@ See [Fence Counter Lifecycle](#fence-counter-lifecycle) section for complete det
 :::
 
 ::: tip Technical Specifications
-For backend implementers: See [specs/postgres-backend.md](https://github.com/kriasoft/syncguard/blob/main/specs/postgres-backend.md) for complete implementation requirements, transaction patterns, and architecture decisions.
+For backend implementers: See [docs/specs/postgres-backend.md](https://github.com/kriasoft/syncguard/blob/main/docs/specs/postgres-backend.md) for complete implementation requirements, transaction patterns, and architecture decisions.
 :::
 
 ## Installation
@@ -328,7 +328,7 @@ DELETE FROM syncguard_fence_counters WHERE fence_key = $1; -- Violates fencing s
 **Configuration Safety**: The backend validates that `fenceTableName` differs from `tableName` to prevent accidental deletion. Attempting to use the same table for both will throw `LockError("InvalidArgument")`.
 
 ::: info Dual Table Pattern
-See [specs/postgres-backend.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/specs/postgres-backend.md#fencing-token-implementation) for the complete dual-table pattern specification and atomic transaction requirements.
+See [docs/specs/postgres-backend.md § Fencing Token Implementation](https://github.com/kriasoft/syncguard/blob/main/docs/specs/postgres-backend.md#fencing-token-implementation) for the complete dual-table pattern specification and atomic transaction requirements.
 :::
 
 ## Common Patterns
@@ -530,7 +530,7 @@ SELECT COUNT(*) FROM syncguard_fence_counters;
 For applications generating >10M unique lock keys annually, consider key normalization or periodic fence counter archival (if monotonicity can be guaranteed through other means).
 
 ::: info Fence Counter Persistence
-Fence counters are intentionally persistent. See [specs/postgres-backend.md § Fence Counter Table Requirements](https://github.com/kriasoft/syncguard/blob/main/specs/postgres-backend.md#fence-counter-table-requirements) for the complete rationale and operational guidance.
+Fence counters are intentionally persistent. See [docs/specs/postgres-backend.md § Fence Counter Table Requirements](https://github.com/kriasoft/syncguard/blob/main/docs/specs/postgres-backend.md#fence-counter-table-requirements) for the complete rationale and operational guidance.
 :::
 
 ::: tip Performance Tip

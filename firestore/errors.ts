@@ -38,7 +38,7 @@ export function checkAbortedForTransaction(signal?: AbortSignal): void {
  *
  * @param error - Firestore SDK error or string
  * @returns LockError with appropriate code and context
- * @see specs/interface.md
+ * @see docs/specs/interface.md
  */
 export function mapFirestoreError(error: any): LockError {
   // Handle internal abort error (check multiple properties for maximum robustness)

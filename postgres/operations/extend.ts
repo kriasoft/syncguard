@@ -37,9 +37,7 @@ import type { LockRow, PostgresConfig } from "../types.js";
  * @param config - PostgreSQL backend configuration
  * @returns Extend operation function
  *
- * @see specs/interface.md#extend-operation-requirements - Normative TOCTOU requirements
- * @see specs/adrs.md ADR-003 - Explicit ownership verification rationale
- * @see specs/adrs.md ADR-010 - Authoritative expiresAtMs from mutations rationale
+ * @see docs/specs/interface.md#extend-operation-requirements - Normative TOCTOU requirements
  */
 export function createExtendOperation(sql: Sql, config: PostgresConfig) {
   return async (opts: LockOp & { ttlMs: number }): Promise<ExtendResult> => {

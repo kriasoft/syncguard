@@ -3,7 +3,7 @@
 Understand how distributed locks work in SyncGuard.
 
 ::: info Architecture & Design Decisions
-Curious about _why_ things work this way? See [specs/adrs.md](https://github.com/kriasoft/syncguard/blob/main/specs/adrs.md) for architectural decision records explaining the rationale behind key design choices.
+Curious about _why_ things work this way? See [ADRs](https://github.com/kriasoft/syncguard/tree/main/docs/adr) for architectural decision records explaining the rationale behind key design choices.
 :::
 
 ## Lock Lifecycle

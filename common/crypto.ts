@@ -134,9 +134,9 @@ function sha256Sync(data: Uint8Array): Uint8Array {
  * @param reserveBytes - Bytes reserved for suffixes in derived keys (e.g., Redis index/fence keys)
  * @returns Storage key, truncated/hashed if necessary
  * @throws {LockError} "InvalidArgument" if prefix + reserve exceeds limit, or if even hashed form exceeds limit
- * @see specs/interface.md#storage-key-generation - Normative specification
- * @see specs/interface.md#fence-key-derivation - Two-step fence key pattern
- * @see specs/adrs.md ADR-006 - Mandatory uniform key truncation rationale
+ * @see docs/specs/interface.md#storage-key-generation - Normative specification
+ * @see docs/specs/interface.md#fence-key-derivation - Two-step fence key pattern
+ * @see docs/adr/006-mandatory-key-truncation.md - Mandatory uniform key truncation rationale
  */
 export function makeStorageKey(
   prefix: string,

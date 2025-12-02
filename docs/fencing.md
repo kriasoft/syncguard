@@ -3,7 +3,7 @@
 Monotonic counters that protect against stale lock holders corrupting data.
 
 ::: tip Technical Deep Dive
-For the complete fence token specification including format contracts, overflow handling, and cross-backend consistency requirements, see [specs/interface.md § Fence Token Types](https://github.com/kriasoft/syncguard/blob/main/specs/interface.md#fence-token-types).
+For the complete fence token specification including format contracts, overflow handling, and cross-backend consistency requirements, see [docs/specs/interface.md § Fence Token Types](https://github.com/kriasoft/syncguard/blob/main/docs/specs/interface.md#fence-token-types).
 :::
 
 ## What are Fencing Tokens?

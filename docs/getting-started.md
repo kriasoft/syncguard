@@ -281,5 +281,5 @@ try {
 - `InvalidArgument`: Invalid parameters (malformed key/lockId)
 
 ::: tip
-See [API Reference](/api#lockerror) for all error codes. For backend error mapping specifications, see [specs/interface.md § Error Handling](https://github.com/kriasoft/syncguard/blob/main/specs/interface.md#error-handling-standards).
+See [API Reference](/api#lockerror) for all error codes. For backend error mapping specifications, see [docs/specs/interface.md § Error Handling](https://github.com/kriasoft/syncguard/blob/main/docs/specs/interface.md#error-handling-standards).
 :::

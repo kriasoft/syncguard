@@ -32,11 +32,8 @@ import type { FirestoreConfig, LockDocument } from "../types.js";
  * Omits `.limit(1)` to detect duplicate lockIds (ADR-014). Expired duplicates cleaned,
  * live duplicates fail safely.
  *
- * @see specs/interface.md#extend-operation-requirements - Normative TOCTOU, ownership, and expiresAtMs requirements
- * @see specs/firestore-backend.md#extend-operation-requirements - Firestore transaction pattern
- * @see specs/adrs.md ADR-003 - Explicit ownership verification rationale
- * @see specs/adrs.md ADR-010 - Authoritative expiresAtMs from mutations rationale
- * @see specs/adrs.md ADR-014 - Defensive duplicate detection rationale
+ * @see docs/specs/interface.md#extend-operation-requirements - Normative TOCTOU, ownership, and expiresAtMs requirements
+ * @see docs/specs/firestore-backend.md#extend-operation-requirements - Firestore transaction pattern
  */
 export function createExtendOperation(
   db: Firestore,

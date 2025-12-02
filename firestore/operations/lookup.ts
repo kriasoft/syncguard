@@ -27,7 +27,7 @@ import type {
  *
  * @remarks
  * Non-atomic queries acceptable for diagnostic lookups (ADR-011). Omits `.limit(1)`
- * to detect duplicate lockIds (ADR-014). See: specs/adrs.md (ADR-011, ADR-014)
+ * to detect duplicate lockIds (ADR-014).
  */
 export function createLookupOperation(
   db: Firestore,

@@ -88,11 +88,11 @@ export default defineConfig({
         items: [
           {
             text: "Specifications",
-            link: "https://github.com/kriasoft/syncguard/tree/main/specs",
+            link: "https://github.com/kriasoft/syncguard/tree/main/docs/specs",
           },
           {
             text: "Architecture Decisions",
-            link: "https://github.com/kriasoft/syncguard/blob/main/specs/adrs.md",
+            link: "https://github.com/kriasoft/syncguard/tree/main/docs/adr",
           },
           {
             text: "Contributing",

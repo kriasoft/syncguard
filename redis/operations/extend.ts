@@ -34,7 +34,7 @@ interface RedisWithCommands {
 
 /**
  * Creates extend operation that atomically renews lock TTL (replaces entirely, not additive).
- * @see specs/redis-backend.md
+ * @see docs/specs/redis-backend.md
  */
 export function createExtendOperation(
   redis: RedisWithCommands,

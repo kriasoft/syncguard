@@ -21,7 +21,7 @@ export function checkAborted(signal?: AbortSignal): void {
  *
  * @param error - Redis client error or string
  * @returns LockError with appropriate code and context
- * @see specs/interface.md
+ * @see docs/specs/interface.md
  */
 export function mapRedisError(error: any): LockError {
   const errorMessage = error instanceof Error ? error.message : String(error);

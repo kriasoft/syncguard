@@ -4,7 +4,7 @@
 /**
  * Canonical time authority predicates for cross-backend consistency.
  * ALL backends MUST use these functions - custom time logic is forbidden.
- * @see specs/interface.md
+ * @see docs/specs/interface.md
  */
 
 /**

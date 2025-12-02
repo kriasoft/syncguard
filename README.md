@@ -577,7 +577,7 @@ acquisition: {
 We welcome contributions! Here's how you can help:
 
 - 🐛 **Bug fixes** - Include test cases
-- 🚀 **New backends** - Follow [specs/interface.md](./specs/interface.md)
+- 🚀 **New backends** - Follow [docs/specs/interface.md](./docs/specs/interface.md)
 - 📖 **Documentation** - Examples, guides, troubleshooting
 - 📋 **Spec reviews** - Validate specs match implementation, propose improvements
 - ✅ **Tests** - Improve coverage
@@ -587,7 +587,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ## Support & Documentation
 
 - **Docs**: [Full documentation](https://kriasoft.com/syncguard/)
-- **Specs**: [Technical specifications](./specs/) - Architecture decisions and backend requirements
+- **Specs**: [Technical specifications](./docs/specs/) - Architecture decisions and backend requirements
 - **Discord**: [Join our community](https://discord.gg/EnbEa7Gsxg)
 - **Issues**: [GitHub Issues](https://github.com/kriasoft/syncguard/issues)
 

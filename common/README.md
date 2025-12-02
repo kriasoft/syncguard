@@ -228,10 +228,5 @@ bun run test:unit
 
 ## Implementation References
 
-- **Specification**: See `specs/interface.md` for complete requirements
-- **ADRs**: See `specs/adrs.md` for design decisions
-  - ADR-003: Explicit Ownership Verification
-  - ADR-004: Fence Token Format
-  - ADR-005: Unified Time Tolerance
-  - ADR-006: Standardized Storage Key Generation
-  - ADR-007: Opt-in Telemetry
+- **Specification**: See `docs/specs/interface.md` for complete requirements
+- **ADRs**: See [`docs/adr/`](../docs/adr/) for design decisions

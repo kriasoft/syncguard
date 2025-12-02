@@ -133,7 +133,7 @@ const backend = createFirestoreBackend(db, {
 3. **Add application health checks to detect clock skew**
 4. **Fail deployments if NTP sync quality is poor**
 
-See `specs/firestore-backend.md#firestore-clock-sync-requirements` for complete operational requirements.
+See `docs/specs/firestore-backend.md#firestore-clock-sync-requirements` for complete operational requirements.
 
 ## Common Patterns
 
@@ -211,7 +211,7 @@ Firestore lacks database-level unique indexes on fields. The library relies on:
 
 ## Implementation References
 
-- **Specification**: See `specs/firestore-backend.md` for complete implementation requirements
-- **Common Interface**: See `specs/interface.md` for shared LockBackend contract
-- **ADRs**: See `specs/adrs.md` for architectural decisions
-- **Clock Sync Requirements**: See `specs/firestore-backend.md#firestore-clock-sync-requirements`
+- **Specification**: See `docs/specs/firestore-backend.md` for complete implementation requirements
+- **Common Interface**: See `docs/specs/interface.md` for shared LockBackend contract
+- **ADRs**: See `docs/adr/` for architectural decisions
+- **Clock Sync Requirements**: See `docs/specs/firestore-backend.md#firestore-clock-sync-requirements`

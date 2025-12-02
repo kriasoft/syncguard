@@ -1547,4 +1547,4 @@ When implementing a new backend, ensure:
 
 ## Architecture Decision Records
 
-See [specs/adrs.md](adrs.md) for architectural decisions and design rationale.
+See [ADRs](../adr/) for architectural decisions and design rationale.

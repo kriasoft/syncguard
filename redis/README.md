@@ -115,6 +115,6 @@ redis-cli --scan --pattern "syncguard:fence:*" | wc -l
 
 ## Implementation References
 
-- **Specification**: See `specs/redis-backend.md` for complete implementation requirements
-- **Common Interface**: See `specs/interface.md` for shared LockBackend contract
-- **ADRs**: See `specs/adrs.md` for architectural decisions
+- **Specification**: See `docs/specs/redis-backend.md` for complete implementation requirements
+- **Common Interface**: See `docs/specs/interface.md` for shared LockBackend contract
+- **ADRs**: See `docs/adr/` for architectural decisions

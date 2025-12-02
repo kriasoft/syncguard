@@ -209,6 +209,6 @@ WHERE expires_at_ms < EXTRACT(EPOCH FROM NOW()) * 1000;
 
 ## Implementation References
 
-- **Specification**: See `specs/postgres-backend.md` for complete implementation requirements
-- **Common Interface**: See `specs/interface.md` for shared LockBackend contract
-- **ADRs**: See `specs/adrs.md` for architectural decisions
+- **Specification**: See `docs/specs/postgres-backend.md` for complete implementation requirements
+- **Common Interface**: See `docs/specs/interface.md` for shared LockBackend contract
+- **ADRs**: See `docs/adr/` for architectural decisions

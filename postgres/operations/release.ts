@@ -34,8 +34,7 @@ import type { LockRow, PostgresConfig } from "../types.js";
  * @param config - PostgreSQL backend configuration
  * @returns Release operation function
  *
- * @see specs/interface.md#release-operation-requirements - Normative TOCTOU requirements
- * @see specs/adrs.md ADR-003 - Explicit ownership verification rationale
+ * @see docs/specs/interface.md#release-operation-requirements - Normative TOCTOU requirements
  */
 export function createReleaseOperation(sql: Sql, config: PostgresConfig) {
   return async (opts: LockOp): Promise<ReleaseResult> => {

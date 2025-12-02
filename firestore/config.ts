@@ -6,7 +6,7 @@ import type { FirestoreBackendOptions, FirestoreConfig } from "./types.js";
 
 /**
  * Default configuration for Firestore backend.
- * @see specs/firestore-backend.md
+ * @see docs/specs/firestore-backend.md
  */
 export const FIRESTORE_DEFAULTS = {
   /** Collection name for lock documents */
@@ -31,7 +31,7 @@ export function createFirestoreConfig(
     options.fenceCollection ?? FIRESTORE_DEFAULTS.fenceCollection;
 
   // CRITICAL: Prevent fence counter deletion by ensuring separate collections
-  // Per specs/firestore-backend.md: Fence counters MUST be independent of lock lifecycle
+  // Per docs/specs/firestore-backend.md: Fence counters MUST be independent of lock lifecycle
   if (collection === fenceCollection) {
     throw new LockError(
       "InvalidArgument",
