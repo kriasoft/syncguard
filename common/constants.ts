@@ -153,3 +153,10 @@ export const FENCE_THRESHOLDS = {
    */
   WARN: "090000000000000",
 } as const;
+
+/**
+ * Maximum value that can be formatted as a 15-digit fence token.
+ * This is the format limit (10^15 - 1), distinct from FENCE_THRESHOLDS.MAX
+ * which is the operational limit enforced by backends.
+ */
+export const FENCE_FORMAT_MAX = 999_999_999_999_999n;
