@@ -7,9 +7,24 @@
 
 TypeScript distributed lock library that prevents race conditions across services. Supports Redis, PostgreSQL, and Firestore backends with automatic cleanup, fencing tokens, and bulletproof concurrency control.
 
+## Documentation
+
+- **Docs site:** https://kriasoft.com/syncguard/
+- **Backend guides:** [Redis](./redis/README.md) · [PostgreSQL](./postgres/README.md) · [Firestore](./firestore/README.md)
+
 ## Requirements
 
 - **Node.js** ≥20.0.0 (targets AsyncDisposable/`await using`; older runtimes require try/finally plus a polyfill, but official support is 20+)
+
+## Compatibility
+
+| Runtime / Backend  | Support                                                                     |
+| ------------------ | --------------------------------------------------------------------------- |
+| Node.js            | 20+ (native AsyncDisposable/`await using`)                                  |
+| Bun                | 1.0+ (used for `bun test`)                                                  |
+| Redis backend      | Redis 6+ with `ioredis` ^5 peer dependency                                  |
+| PostgreSQL backend | PostgreSQL 12+ with `postgres` ^3 peer dependency                           |
+| Firestore backend  | `@google-cloud/firestore` ^8 peer dependency (emulator supported for tests) |
 
 ## Installation
 
@@ -20,9 +35,9 @@ SyncGuard is backend-agnostic. Install the base package plus any backends you ne
 npm install syncguard
 
 # Choose one or more backends (optional peer dependencies):
-npm install ioredis          # for Redis backend
-npm install postgres         # for PostgreSQL backend
-npm install @google-cloud/firestore  # for Firestore backend
+npm install syncguard ioredis                  # Redis backend
+npm install syncguard postgres                 # PostgreSQL backend
+npm install syncguard @google-cloud/firestore  # Firestore backend
 ```
 
 Only install the backend packages you actually use. If you attempt to use a backend without its package installed, you'll get a clear error message.
@@ -91,6 +106,8 @@ await lock(
 ```
 
 ### Manual Lock Control with Automatic Cleanup
+
+Node.js 20+ supports `await using` natively; for older runtimes, drop to try/finally (see below).
 
 Use `await using` for automatic cleanup on all code paths (Node.js ≥20):
 
@@ -571,6 +588,13 @@ acquisition: {
   retryDelayMs: 100,
 }
 ```
+
+## Development
+
+- `bun test test/unit` — fast unit tests
+- `bun test test/contracts test/e2e` — contracts + e2e suite
+- `npm run build` — type-check and emit `dist/`
+- `npm run redis` / `npm run firestore` — spin up local Redis or Firestore emulator for tests
 
 ## Contributing
 

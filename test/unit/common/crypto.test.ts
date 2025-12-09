@@ -149,8 +149,33 @@ describe("makeStorageKey", () => {
   it("should throw when prefix exceeds backend limit", () => {
     const longPrefix = "x".repeat(500);
     expect(() => makeStorageKey(longPrefix, "key", 100, 0)).toThrow(
-      "Prefix exceeds backend limit",
+      /Prefix exceeds backend limit/,
     );
+  });
+
+  it("should reject invalid backendLimitBytes", () => {
+    expect(() => makeStorageKey("p", "k", -1, 0)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 0, 0)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", NaN, 0)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", Infinity, 0)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 1000.5, 0)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", -1, 0)).toThrow(
+      "backendLimitBytes must be a positive integer",
+    );
+  });
+
+  it("should reject invalid reserveBytes", () => {
+    expect(() => makeStorageKey("p", "k", 1000, -1)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 1000, NaN)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 1000, Infinity)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 1000, 0.5)).toThrow(LockError);
+    expect(() => makeStorageKey("p", "k", 1000, -1)).toThrow(
+      "reserveBytes must be a non-negative integer",
+    );
+  });
+
+  it("should allow zero reserveBytes", () => {
+    expect(() => makeStorageKey("p", "k", 1000, 0)).not.toThrow();
   });
 });
 
@@ -245,14 +270,33 @@ describe("formatFence", () => {
     expect(formatFence(999_999_999_999_999n)).toBe("999999999999999");
   });
 
-  it("should truncate floating point numbers", () => {
-    expect(formatFence(42.9)).toBe("000000000000042");
-    expect(formatFence(42.1)).toBe("000000000000042");
+  it("should accept values at operational threshold (FENCE_THRESHOLDS.MAX)", () => {
+    // Sanity check: operational threshold (9e14) < format limit (10^15-1)
+    expect(formatFence(900_000_000_000_000)).toBe("900000000000000");
+    expect(formatFence(900_000_000_000_000n)).toBe("900000000000000");
+  });
+
+  it("should reject non-integer numbers", () => {
+    expect(() => formatFence(42.9)).toThrow(LockError);
+    expect(() => formatFence(42.1)).toThrow(LockError);
+    expect(() => formatFence(0.1)).toThrow(LockError);
+  });
+
+  it("should reject negative fractional values", () => {
+    // Edge case: -0.1 must not be truncated to 0
+    expect(() => formatFence(-0.1)).toThrow(LockError);
+    expect(() => formatFence(-0.0001)).toThrow(LockError);
+  });
+
+  it("should reject non-finite values", () => {
+    expect(() => formatFence(NaN)).toThrow(LockError);
+    expect(() => formatFence(Infinity)).toThrow(LockError);
+    expect(() => formatFence(-Infinity)).toThrow(LockError);
   });
 
   it("should throw for negative values", () => {
     expect(() => formatFence(-1)).toThrow(LockError);
-    expect(() => formatFence(-1)).toThrow("Fence must be non-negative");
+    expect(() => formatFence(-1)).toThrow("finite non-negative integer");
     expect(() => formatFence(-1n)).toThrow("Fence must be non-negative");
   });
 

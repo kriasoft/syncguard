@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { createHash, randomBytes } from "node:crypto";
+import { FENCE_FORMAT_MAX } from "./constants.js";
 import { LockError } from "./errors.js";
 import type { HashId } from "./types.js";
 
@@ -35,12 +36,11 @@ export function generateLockId(): string {
 
 /**
  * Canonical 96-bit hash for user keys (NFC normalized, 24 hex chars).
- * Collision probability: ~6.3e-12 at 10^9 distinct IDs.
  *
  * @remarks **Non-cryptographic hash for observability only.**
- * This function uses a fast, non-cryptographic hash algorithm suitable for
- * sanitization, telemetry, and UI display. Do NOT use for security-sensitive
- * collision resistance or any cryptographic purposes.
+ * Uses a fast triple-hash algorithm suitable for sanitization, telemetry,
+ * and UI display. Effective 96-bit space provides low collision probability
+ * for typical workloads. Do NOT use for security-sensitive purposes.
  *
  * @param value - User-provided key string
  * @returns 24-character hex hash identifier
@@ -72,20 +72,28 @@ export function hashKey(value: string): HashId {
  * Internal helper - backends use this for consistent fence formatting.
  * 15-digit format guarantees full safety within Lua's 53-bit precision limit
  * (2^53-1 ≈ 9.007e15) while providing 10^15 capacity (~31.7 years at 1M locks/sec).
- * @param value - Fence counter (bigint or number)
+ * @param value - Fence counter (bigint or integer number)
  * @returns 15-digit string (e.g., "000000000000001")
- * @throws {LockError} "InvalidArgument" if value is negative or exceeds 15-digit limit
+ * @throws {LockError} "InvalidArgument" if value is not a finite non-negative integer
  */
 export function formatFence(value: bigint | number): string {
-  // Convert to bigint and enforce integer + range
-  const n = typeof value === "number" ? BigInt(Math.trunc(value)) : value;
+  // Validate numbers before BigInt conversion to avoid leaking RangeError
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+      throw new LockError(
+        "InvalidArgument",
+        "Fence must be a finite non-negative integer",
+      );
+    }
+  }
+
+  const n = typeof value === "bigint" ? value : BigInt(value);
 
   if (n < 0n) {
     throw new LockError("InvalidArgument", "Fence must be non-negative");
   }
 
-  if (n > 999_999_999_999_999n) {
-    // 15 digits max (10^15 - 1)
+  if (n > FENCE_FORMAT_MAX) {
     throw new LockError(
       "InvalidArgument",
       `Fence exceeds 15-digit limit: ${n}`,
@@ -144,6 +152,29 @@ export function makeStorageKey(
   backendLimitBytes: number,
   reserveBytes: number,
 ): string {
+  // Validate configuration (fail fast on misconfigured backends)
+  if (
+    !Number.isFinite(backendLimitBytes) ||
+    !Number.isInteger(backendLimitBytes) ||
+    backendLimitBytes <= 0
+  ) {
+    throw new LockError(
+      "InvalidArgument",
+      "backendLimitBytes must be a positive integer",
+    );
+  }
+
+  if (
+    !Number.isFinite(reserveBytes) ||
+    !Number.isInteger(reserveBytes) ||
+    reserveBytes < 0
+  ) {
+    throw new LockError(
+      "InvalidArgument",
+      "reserveBytes must be a non-negative integer",
+    );
+  }
+
   // Validate key is not empty
   if (!key) {
     throw new LockError("InvalidArgument", "Key must not be empty");
